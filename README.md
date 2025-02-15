@@ -63,3 +63,5 @@ See something you could make better? Pull requests are welcome. No bureaucracy -
 
 
 Built with Go, powered by NewsAPI, and zero bloat. Questions? Drop an issue in the repo.
+
+## GUI mode coming soon bro's
