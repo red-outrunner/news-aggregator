@@ -1,5 +1,6 @@
 # news-aggregator
 News collecting code from various sites
+craeted by Weo Sikho Fuzile
 
 # News Aggregator 🗞️
 
