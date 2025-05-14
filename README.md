@@ -65,4 +65,9 @@ See something you could make better? Pull requests are welcome. No bureaucracy -
 
 Built with Go, powered by NewsAPI, and zero bloat. Questions? Drop an issue in the repo.
 
-## GUI mode coming soon bro's
+## GUI mode changes coming soon bro's
+
+to make it mire fresh and seamless like Thanos glove:
+1. entering API key on Gui Mode also on console mode
+2. add up sort function on the console
+3. get access to more news site where reading articles cost $free.99c
