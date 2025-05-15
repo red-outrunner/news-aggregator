@@ -73,3 +73,4 @@ to make it mire fresh and seamless like Thanos glove:
 3. get access to more news site where reading articles cost $free.99c
 4. make the thing a bit pretty
 5. have bookmarks
+6. measure memory when running
