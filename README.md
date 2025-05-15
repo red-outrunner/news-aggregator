@@ -75,3 +75,4 @@ to make it mire fresh and seamless like Thanos glove:
 5. have bookmarks
 6. measure memory when running
 7. api to web?
+8. build and package it
