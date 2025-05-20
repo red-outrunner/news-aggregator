@@ -3,7 +3,7 @@ package main
 import (
 	"encoding/json"
 	"fmt"
-	"io/ioutil"
+	"io"
 	"net/http"
 	"net/url"
 	"os"
@@ -16,6 +16,7 @@ import (
 	"fyne.io/fyne/v2/app"
 	"fyne.io/fyne/v2/container"
 	"fyne.io/fyne/v2/layout"
+	"fyne.io/fyne/v2/theme"
 	"fyne.io/fyne/v2/widget"
 )
 
@@ -71,7 +72,7 @@ func fetchNews(apiKey, query string) ([]Article, error) {
 	}
 	defer resp.Body.Close()
 
-	body, err := ioutil.ReadAll(resp.Body)
+	body, err := io.ReadAll(resp.Body)
 	if err != nil {
 		return nil, err
 	}
@@ -92,7 +93,7 @@ func loadSavedKey() string {
 		return ""
 	}
 	path := filepath.Join(home, ".config", "apikey.txt")
-	data, err := ioutil.ReadFile(path)
+	data, err := os.ReadFile(path)
 	if err != nil {
 		return ""
 	}
@@ -105,15 +106,55 @@ func saveAPIKey(key string) error {
 		return err
 	}
 	dir := filepath.Join(home, ".config")
-	os.MkdirAll(dir, 0700)
+	if err := os.MkdirAll(dir, 0700); err != nil {
+		return err
+	}
 	path := filepath.Join(dir, "apikey.txt")
-	return ioutil.WriteFile(path, []byte(key), 0600)
+	return os.WriteFile(path, []byte(key), 0600)
+}
+
+func loadThemePreference() bool {
+	home, err := os.UserHomeDir()
+	if err != nil {
+		return false // Default to light theme
+	}
+	path := filepath.Join(home, ".config", "news_theme.txt")
+	data, err := os.ReadFile(path)
+	if err != nil {
+		return false // Default to light theme
+	}
+	return strings.TrimSpace(string(data)) == "dark"
+}
+
+func saveThemePreference(isDark bool) error {
+	home, err := os.UserHomeDir()
+	if err != nil {
+		return err
+	}
+	dir := filepath.Join(home, ".config")
+	if err := os.MkdirAll(dir, 0700); err != nil {
+		return err
+	}
+	path := filepath.Join(dir, "news_theme.txt")
+	theme := "light"
+	if isDark {
+		theme = "dark"
+	}
+	return os.WriteFile(path, []byte(theme), 0600)
 }
 
 func main() {
 	myApp := app.New()
 	myWindow := myApp.NewWindow("News Aggregator")
 	myWindow.Resize(fyne.NewSize(700, 600))
+
+	// Load theme preference
+	isDarkTheme := loadThemePreference()
+	if isDarkTheme {
+		myApp.Settings().SetTheme(theme.DarkTheme())
+	} else {
+		myApp.Settings().SetTheme(theme.LightTheme())
+	}
 
 	keyInput := widget.NewEntry()
 	keyInput.SetPlaceHolder("Enter your NewsAPI key...")
@@ -130,6 +171,17 @@ func main() {
 
 	sortAsc := false
 	sortBtn := widget.NewButton("Sort: New → Old", nil)
+
+	// Theme toggle button
+	themeBtn := widget.NewButton("Toggle Dark/Light", func() {
+		isDarkTheme = !isDarkTheme
+		if isDarkTheme {
+			myApp.Settings().SetTheme(theme.DarkTheme())
+		} else {
+			myApp.Settings().SetTheme(theme.LightTheme())
+		}
+		saveThemePreference(isDarkTheme)
+	})
 
 	search := func() {
 		key := keyInput.Text
@@ -200,7 +252,7 @@ func main() {
 			      widget.NewLabel("API Key:"), keyInput,
 			      widget.NewLabel(""), container.NewHBox(useOnceBtn, keepBtn),
 			      widget.NewLabel("Query:"), queryInput,
-			      widget.NewLabel(""), container.NewHBox(searchBtn, sortBtn),
+			      widget.NewLabel(""), container.NewHBox(searchBtn, sortBtn, themeBtn),
 		),
 	)
 
