@@ -64,27 +64,27 @@ func humanTime(tStr string) string {
 	}
 }
 
-func fetchNews(apiKey, query string) ([]Article, error) {
-	url := fmt.Sprintf("https://newsapi.org/v2/everything?q=%s&sortBy=publishedAt&language=en&apiKey=%s", query, apiKey)
+func fetchNews(apiKey, query string, page int) ([]Article, int, error) {
+	url := fmt.Sprintf("https://newsapi.org/v2/everything?q=%s&sortBy=publishedAt&language=en&pageSize=18&page=%d&apiKey=%s", query, page, apiKey)
 	resp, err := http.Get(url)
 	if err != nil {
-		return nil, err
+		return nil, 0, err
 	}
 	defer resp.Body.Close()
 
 	body, err := io.ReadAll(resp.Body)
 	if err != nil {
-		return nil, err
+		return nil, 0, err
 	}
 
 	var newsResponse NewsResponse
 	if err := json.Unmarshal(body, &newsResponse); err != nil {
-		return nil, err
+		return nil, 0, err
 	}
 	if newsResponse.Status != "ok" {
-		return nil, fmt.Errorf("API error: %s", body)
+		return nil, 0, fmt.Errorf("API error: %s", body)
 	}
-	return newsResponse.Articles, nil
+	return newsResponse.Articles, newsResponse.TotalResults, nil
 }
 
 func loadSavedKey() string {
@@ -169,6 +169,18 @@ func main() {
 	results := container.NewVBox()
 	scroll := container.NewVScroll(results)
 
+	// Load More button
+	loadMoreBtn := widget.NewButton("Load More", nil)
+	loadMoreBtn.Hide() // Hidden until search results are loaded
+	loadMoreContainer := container.NewCenter(loadMoreBtn)
+
+	// State for pagination
+	var currentPage = 1
+	var totalResults = 0
+	var allArticles []Article
+	var lastQuery string
+	var lastSortAsc bool
+
 	sortAsc := false
 	sortBtn := widget.NewButton("Sort: New → Old", nil)
 
@@ -183,31 +195,39 @@ func main() {
 		saveThemePreference(isDarkTheme)
 	})
 
-	search := func() {
+	// Define searchBtn before use
+	searchBtn := widget.NewButton("Search", func() {
 		key := keyInput.Text
 		query := queryInput.Text
 		if key == "" {
 			results.Objects = []fyne.CanvasObject{widget.NewLabel("⚠️ API key required.")}
 			results.Refresh()
+			loadMoreBtn.Hide()
 			return
 		}
-		articles, err := fetchNews(key, query)
+		// Reset pagination for new search
+		currentPage = 1
+		allArticles = nil
+		lastQuery = query
+		lastSortAsc = sortAsc
+		articles, total, err := fetchNews(key, query, currentPage)
 		if err != nil {
 			results.Objects = []fyne.CanvasObject{widget.NewLabel("❌ Failed to fetch news.")}
 			results.Refresh()
+			loadMoreBtn.Hide()
 			return
 		}
 		if len(articles) == 0 {
 			results.Objects = []fyne.CanvasObject{widget.NewLabel("🔍 No results found — try tweaking your search query.")}
 			results.Refresh()
+			loadMoreBtn.Hide()
 			return
 		}
-		sortByTime(articles, sortAsc)
-		if len(articles) > 18 {
-			articles = articles[:18]
-		}
+		totalResults = total
+		allArticles = articles
+		sortByTime(allArticles, sortAsc)
 		results.Objects = nil
-		for _, a := range articles {
+		for _, a := range allArticles {
 			link, _ := url.Parse(a.URL)
 			vbox := container.NewVBox(
 				widget.NewHyperlink(fmt.Sprintf("[%s] %s", humanTime(a.PublishedAt), a.Title), link),
@@ -215,10 +235,50 @@ func main() {
 			)
 			results.Add(vbox)
 		}
+		// Show Load More button if more results are available
+		if len(allArticles) < totalResults {
+			loadMoreBtn.Show()
+		} else {
+			loadMoreBtn.Hide()
+		}
+		results.Refresh()
+	})
+
+	loadMoreBtn.OnTapped = func() {
+		currentPage++
+		articles, total, err := fetchNews(keyInput.Text, lastQuery, currentPage)
+		if err != nil {
+			results.Add(widget.NewLabel("❌ Failed to load more news."))
+			results.Refresh()
+			loadMoreBtn.Hide()
+			return
+		}
+		if len(articles) == 0 {
+			results.Add(widget.NewLabel("📪 No more articles available."))
+			results.Refresh()
+			loadMoreBtn.Hide()
+			return
+		}
+		totalResults = total
+		allArticles = append(allArticles, articles...)
+		sortByTime(allArticles, lastSortAsc)
+		results.Objects = nil
+		for _, a := range allArticles {
+			link, _ := url.Parse(a.URL)
+			vbox := container.NewVBox(
+				widget.NewHyperlink(fmt.Sprintf("[%s] %s", humanTime(a.PublishedAt), a.Title), link),
+						  widget.NewLabel(a.Description),
+			)
+			results.Add(vbox)
+		}
+		// Update Load More button visibility
+		if len(allArticles) < totalResults {
+			loadMoreBtn.Show()
+		} else {
+			loadMoreBtn.Hide()
+		}
 		results.Refresh()
 	}
-
-	searchBtn := widget.NewButton("Search", search)
 
 	sortBtn.OnTapped = func() {
 		sortAsc = !sortAsc
@@ -227,11 +287,24 @@ func main() {
 		} else {
 			sortBtn.SetText("Sort: New → Old")
 		}
-		search()
+		lastSortAsc = sortAsc
+		if len(allArticles) > 0 {
+			sortByTime(allArticles, sortAsc)
+			results.Objects = nil
+			for _, a := range allArticles {
+				link, _ := url.Parse(a.URL)
+				vbox := container.NewVBox(
+					widget.NewHyperlink(fmt.Sprintf("[%s] %s", humanTime(a.PublishedAt), a.Title), link),
+							  widget.NewLabel(a.Description),
+				)
+				results.Add(vbox)
+			}
+			results.Refresh()
+		}
 	}
 
 	useOnceBtn := widget.NewButton("Use Once", func() {
-		search()
+		searchBtn.OnTapped()
 	})
 
 	keepBtn := widget.NewButton("Keep Key", func() {
@@ -256,7 +329,7 @@ func main() {
 		),
 	)
 
-	content := container.NewBorder(topBar, nil, nil, nil, scroll)
+	content := container.NewBorder(topBar, loadMoreContainer, nil, nil, scroll)
 	myWindow.SetContent(content)
 	myWindow.ShowAndRun()
 }
