@@ -9,14 +9,13 @@ import (
 	"os"
 	"path/filepath"
 	"sort"
+	"strings"
 	"time"
 
 	"fyne.io/fyne/v2"
 	"fyne.io/fyne/v2/app"
 	"fyne.io/fyne/v2/container"
-	"fyne.io/fyne/v2/dialog"
 	"fyne.io/fyne/v2/layout"
-	// "fyne.io/fyne/v2/storage"
 	"fyne.io/fyne/v2/widget"
 )
 
@@ -33,30 +32,6 @@ type NewsResponse struct {
 	Articles     []Article `json:"articles"`
 }
 
-const apiKeyFile = "apikey.txt"
-
-func saveAPIKeyToFile(key string) error {
-	path, err := os.UserConfigDir()
-	if err != nil {
-		return err
-	}
-	filePath := filepath.Join(path, apiKeyFile)
-	return ioutil.WriteFile(filePath, []byte(key), 0600)
-}
-
-func loadAPIKeyFromFile() (string, error) {
-	path, err := os.UserConfigDir()
-	if err != nil {
-		return "", err
-	}
-	filePath := filepath.Join(path, apiKeyFile)
-	data, err := ioutil.ReadFile(filePath)
-	if err != nil {
-		return "", err
-	}
-	return string(data), nil
-}
-
 func sortByTime(articles []Article, ascending bool) {
 	sort.Slice(articles, func(i, j int) bool {
 		t1, _ := time.Parse(time.RFC3339, articles[i].PublishedAt)
@@ -66,6 +41,26 @@ func sortByTime(articles []Article, ascending bool) {
 		}
 		return t1.After(t2)
 	})
+}
+
+func humanTime(tStr string) string {
+	t, err := time.Parse(time.RFC3339, tStr)
+	if err != nil {
+		return tStr
+	}
+	dur := time.Since(t)
+	switch {
+		case dur < time.Minute:
+			return "just now"
+		case dur < time.Hour:
+			return fmt.Sprintf("%dm ago", int(dur.Minutes()))
+		case dur < 24*time.Hour:
+			return fmt.Sprintf("%dh ago", int(dur.Hours()))
+		case dur < 7*24*time.Hour:
+			return fmt.Sprintf("%dd ago", int(dur.Hours()/24))
+		default:
+			return t.Format("Jan 2")
+	}
 }
 
 func fetchNews(apiKey, query string) ([]Article, error) {
@@ -91,54 +86,87 @@ func fetchNews(apiKey, query string) ([]Article, error) {
 	return newsResponse.Articles, nil
 }
 
+func loadSavedKey() string {
+	home, err := os.UserHomeDir()
+	if err != nil {
+		return ""
+	}
+	path := filepath.Join(home, ".config", "apikey.txt")
+	data, err := ioutil.ReadFile(path)
+	if err != nil {
+		return ""
+	}
+	return strings.TrimSpace(string(data))
+}
+
+func saveAPIKey(key string) error {
+	home, err := os.UserHomeDir()
+	if err != nil {
+		return err
+	}
+	dir := filepath.Join(home, ".config")
+	os.MkdirAll(dir, 0700)
+	path := filepath.Join(dir, "apikey.txt")
+	return ioutil.WriteFile(path, []byte(key), 0600)
+}
+
 func main() {
 	myApp := app.New()
-	myWindow := myApp.NewWindow("Ubomvu News")
+	myWindow := myApp.NewWindow("News Aggregator")
 	myWindow.Resize(fyne.NewSize(700, 600))
 
-	var apiKey string
-	storedKey, err := loadAPIKeyFromFile()
-	if err == nil && storedKey != "" {
-		apiKey = storedKey
+	keyInput := widget.NewEntry()
+	keyInput.SetPlaceHolder("Enter your NewsAPI key...")
+	apiKey := loadSavedKey()
+	if apiKey != "" {
+		keyInput.SetText(apiKey)
 	}
-
-	results := container.NewVBox()
-	scroll := container.NewVScroll(results)
 
 	queryInput := widget.NewEntry()
 	queryInput.SetPlaceHolder("Search for news topics...")
 
+	results := container.NewVBox()
+	scroll := container.NewVScroll(results)
+
 	sortAsc := false
 	sortBtn := widget.NewButton("Sort: New → Old", nil)
 
-	searchBtn := widget.NewButton("Search", nil)
-
-	searchFunc := func() {
+	search := func() {
+		key := keyInput.Text
 		query := queryInput.Text
-		if apiKey == "" {
+		if key == "" {
 			results.Objects = []fyne.CanvasObject{widget.NewLabel("⚠️ API key required.")}
 			results.Refresh()
 			return
 		}
-		articles, err := fetchNews(apiKey, query)
+		articles, err := fetchNews(key, query)
 		if err != nil {
 			results.Objects = []fyne.CanvasObject{widget.NewLabel("❌ Failed to fetch news.")}
 			results.Refresh()
 			return
 		}
+		if len(articles) == 0 {
+			results.Objects = []fyne.CanvasObject{widget.NewLabel("🔍 No results found — try tweaking your search query.")}
+			results.Refresh()
+			return
+		}
+		sortByTime(articles, sortAsc)
 		if len(articles) > 18 {
 			articles = articles[:18]
 		}
-		sortByTime(articles, sortAsc)
 		results.Objects = nil
 		for _, a := range articles {
 			link, _ := url.Parse(a.URL)
-			results.Add(widget.NewHyperlink(fmt.Sprintf("[%s] %s", a.PublishedAt[:10], a.Title), link))
+			vbox := container.NewVBox(
+				widget.NewHyperlink(fmt.Sprintf("[%s] %s", humanTime(a.PublishedAt), a.Title), link),
+						  widget.NewLabel(a.Description),
+			)
+			results.Add(vbox)
 		}
 		results.Refresh()
 	}
 
-	searchBtn.OnTapped = searchFunc
+	searchBtn := widget.NewButton("Search", search)
 
 	sortBtn.OnTapped = func() {
 		sortAsc = !sortAsc
@@ -147,45 +175,31 @@ func main() {
 		} else {
 			sortBtn.SetText("Sort: New → Old")
 		}
-		searchFunc()
+		search()
 	}
 
-	apiKeyEntry := widget.NewEntry()
-	apiKeyEntry.SetPlaceHolder("Enter your NewsAPI key")
-
 	useOnceBtn := widget.NewButton("Use Once", func() {
-		apiKey = apiKeyEntry.Text
-		if apiKey == "" {
-			dialog.ShowError(fmt.Errorf("API key cannot be empty"), myWindow)
-			return
-		}
-		dialog.ShowInformation("Ready", "API key will be used for this session only.", myWindow)
+		search()
 	})
 
 	keepBtn := widget.NewButton("Keep Key", func() {
-		apiKey = apiKeyEntry.Text
-		if apiKey == "" {
-			dialog.ShowError(fmt.Errorf("API key cannot be empty"), myWindow)
-			return
-		}
-		err := saveAPIKeyToFile(apiKey)
+		err := saveAPIKey(keyInput.Text)
 		if err != nil {
-			dialog.ShowError(err, myWindow)
-			return
+			r := container.NewVBox(widget.NewLabel("❌ Failed to save API key."))
+			results.Objects = r.Objects
+			results.Refresh()
+		} else {
+			r := container.NewVBox(widget.NewLabel("✅ API key saved."))
+			results.Objects = r.Objects
+			results.Refresh()
 		}
-		dialog.ShowInformation("Saved", "API key saved and will be used automatically.", myWindow)
 	})
 
-	apiKeyBox := container.NewVBox(
-		widget.NewLabel("Enter NewsAPI Key:"),
-				       apiKeyEntry,
-				       container.NewHBox(useOnceBtn, keepBtn),
-	)
-
 	topBar := container.NewVBox(
-		apiKeyBox,
 		container.New(layout.NewFormLayout(),
-			      widget.NewLabel(""), queryInput,
+			      widget.NewLabel("API Key:"), keyInput,
+			      widget.NewLabel(""), container.NewHBox(useOnceBtn, keepBtn),
+			      widget.NewLabel("Query:"), queryInput,
 			      widget.NewLabel(""), container.NewHBox(searchBtn, sortBtn),
 		),
 	)
