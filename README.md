@@ -74,5 +74,6 @@ to make it mire fresh and seamless like Thanos glove:
 4. make the thing a bit pretty
 5. have bookmarks
 6. measure memory when running
-7. api to web?
+7. api to web page - dread
 8. build and package it
+9. Ai summary + prompt to figure out narative or sumn like that
