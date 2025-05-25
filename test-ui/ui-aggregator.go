@@ -15,16 +15,17 @@ import (
 	"fyne.io/fyne/v2"
 	"fyne.io/fyne/v2/app"
 	"fyne.io/fyne/v2/container"
-	"fyne.io/fyne/v2/layout"
 	"fyne.io/fyne/v2/theme"
 	"fyne.io/fyne/v2/widget"
 )
 
 type Article struct {
-	Title       string `json:"title"`
-	Description string `json:"description"`
-	URL         string `json:"url"`
-	PublishedAt string `json:"publishedAt"`
+	Title           string `json:"title"`
+	Description     string `json:"description"`
+	URL             string `json:"url"`
+	PublishedAt     string `json:"publishedAt"`
+	ImpactScore     int    `json:"impactScore,omitempty"`
+	PolicyProbability int `json:"policyProbability,omitempty"`
 }
 
 type NewsResponse struct {
@@ -84,6 +85,12 @@ func fetchNews(apiKey, query string, page int) ([]Article, int, error) {
 	if newsResponse.Status != "ok" {
 		return nil, 0, fmt.Errorf("API error: %s", body)
 	}
+
+	for i := range newsResponse.Articles {
+		newsResponse.Articles[i].ImpactScore = calculateImpactScore(newsResponse.Articles[i].Title + " " + newsResponse.Articles[i].Description)
+		newsResponse.Articles[i].PolicyProbability = calculatePolicyProbability(newsResponse.Articles[i].Title + " " + newsResponse.Articles[i].Description)
+	}
+
 	return newsResponse.Articles, newsResponse.TotalResults, nil
 }
 
@@ -116,12 +123,12 @@ func saveAPIKey(key string) error {
 func loadThemePreference() bool {
 	home, err := os.UserHomeDir()
 	if err != nil {
-		return false // Default to light theme
+		return false
 	}
 	path := filepath.Join(home, ".config", "news_theme.txt")
 	data, err := os.ReadFile(path)
 	if err != nil {
-		return false // Default to light theme
+		return false
 	}
 	return strings.TrimSpace(string(data)) == "dark"
 }
@@ -143,12 +150,84 @@ func saveThemePreference(isDark bool) error {
 	return os.WriteFile(path, []byte(theme), 0600)
 }
 
+func summarizeText(text string) string {
+	if text == "" {
+		return "No content available."
+	}
+	sentences := strings.Split(text, ".")
+	if len(sentences) == 0 {
+		return text
+	}
+	count := 0
+	var summary strings.Builder
+	for _, s := range sentences {
+		s = strings.TrimSpace(s)
+		if s != "" {
+			summary.WriteString(s + ".")
+			count++
+			if count >= 2 {
+				break
+			}
+		}
+	}
+	result := summary.String()
+	if result == "" {
+		return text[:min(100, len(text))] + "..."
+	}
+	return result
+}
+
+func calculateImpactScore(text string) int {
+	keywords := []string{"crisis", "breakthrough", "disaster", "economy", "war", "pandemic", "reform"}
+	score := 0
+	text = strings.ToLower(text)
+	for _, k := range keywords {
+		if strings.Contains(text, k) {
+			score += 20
+		}
+	}
+	return min(100, score)
+}
+
+func calculatePolicyProbability(text string) int {
+	keywords := []string{"policy", "regulation", "law", "government", "legislation", "bill", "congress"}
+	score := 0
+	text = strings.ToLower(text)
+	for _, k := range keywords {
+		if strings.Contains(text, k) {
+			score += 25
+		}
+	}
+	return min(100, score)
+}
+
+func min(a, b int) int {
+	if a < b {
+		return a
+	}
+	return b
+}
+
+func askAI(question string, articles []Article) string {
+	question = strings.ToLower(question)
+	var results strings.Builder
+	for _, a := range articles {
+		content := strings.ToLower(a.Title + " " + a.Description)
+		if strings.Contains(content, question) {
+			results.WriteString(fmt.Sprintf("- %s: %s\n", a.Title, summarizeText(a.Description)))
+		}
+	}
+	if results.String() == "" {
+		return "No relevant information found in the articles."
+	}
+	return results.String()
+}
+
 func main() {
 	myApp := app.New()
 	myWindow := myApp.NewWindow("News Aggregator")
-	myWindow.Resize(fyne.NewSize(700, 600))
+	myWindow.Resize(fyne.NewSize(700, 700))
 
-	// Load theme preference
 	isDarkTheme := loadThemePreference()
 	if isDarkTheme {
 		myApp.Settings().SetTheme(theme.DarkTheme())
@@ -165,26 +244,22 @@ func main() {
 
 	queryInput := widget.NewEntry()
 	queryInput.SetPlaceHolder("Search for news topics...")
+	askAIInput := widget.NewEntry()
+	askAIInput.SetPlaceHolder("Ask a question about the articles...")
 
 	results := container.NewVBox()
 	scroll := container.NewVScroll(results)
 
-	// Load More button
 	loadMoreBtn := widget.NewButton("Load More", nil)
-	loadMoreBtn.Hide() // Hidden until search results are loaded
+	loadMoreBtn.Hide()
 	loadMoreContainer := container.NewCenter(loadMoreBtn)
 
-	// State for pagination
 	var currentPage = 1
 	var totalResults = 0
 	var allArticles []Article
-	var lastQuery string
-	var lastSortAsc bool
 
 	sortAsc := false
 	sortBtn := widget.NewButton("Sort: New → Old", nil)
-
-	// Theme toggle button
 	themeBtn := widget.NewButton("Toggle Dark/Light", func() {
 		isDarkTheme = !isDarkTheme
 		if isDarkTheme {
@@ -195,7 +270,108 @@ func main() {
 		saveThemePreference(isDarkTheme)
 	})
 
-	// Define searchBtn before use
+	exportBtn := widget.NewButton("Export to Markdown", func() {
+		var sb strings.Builder
+		sb.WriteString("# News Articles\n\n")
+		for _, a := range allArticles {
+			sb.WriteString(fmt.Sprintf("## %s\n", a.Title))
+			sb.WriteString(fmt.Sprintf("- **URL**: %s\n", a.URL))
+			sb.WriteString(fmt.Sprintf("- **Published**: %s\n", humanTime(a.PublishedAt)))
+			sb.WriteString(fmt.Sprintf("- **Description**: %s\n", a.Description))
+			sb.WriteString(fmt.Sprintf("- **Impact Score**: %d\n", a.ImpactScore))
+			sb.WriteString(fmt.Sprintf("- **Policy Probability**: %d%%\n", a.PolicyProbability))
+			sb.WriteString("\n")
+		}
+		home, _ := os.UserHomeDir()
+		path := filepath.Join(home, "news_export.md")
+		if err := os.WriteFile(path, []byte(sb.String()), 0644); err != nil {
+			myApp.SendNotification(&fyne.Notification{
+				Title:   "Export Error",
+				Content: err.Error(),
+			})
+			return
+		}
+		myApp.SendNotification(&fyne.Notification{
+			Title:   "Export Success",
+			Content: fmt.Sprintf("Exported to %s", path),
+		})
+	})
+
+	clipboardBtn := widget.NewButton("Copy to Clipboard", func() {
+		var sb strings.Builder
+		sb.WriteString("# News Articles\n\n")
+		for _, a := range allArticles {
+			sb.WriteString(fmt.Sprintf("## %s\n", a.Title))
+			sb.WriteString(fmt.Sprintf("- **URL**: %s\n", a.URL))
+			sb.WriteString(fmt.Sprintf("- **Published**: %s\n", humanTime(a.PublishedAt)))
+			sb.WriteString(fmt.Sprintf("- **Description**: %s\n", a.Description))
+			sb.WriteString(fmt.Sprintf("- **Impact Score**: %d\n", a.ImpactScore))
+			sb.WriteString(fmt.Sprintf("- **Policy Probability**: %d%%\n", a.PolicyProbability))
+			sb.WriteString("\n")
+		}
+		myWindow.Clipboard().SetContent(sb.String())
+		myApp.SendNotification(&fyne.Notification{
+			Title:   "Clipboard Success",
+			Content: "Articles copied to clipboard",
+		})
+	})
+
+	// Moved showSummaryDialog here to ensure it's defined before use
+	showSummaryDialog := func(content string) {
+		var dlg *widget.PopUp
+		dlg = widget.NewModalPopUp(
+			container.NewVBox(
+				widget.NewLabelWithStyle("Result:", fyne.TextAlignLeading, fyne.TextStyle{Bold: true}),
+					  widget.NewLabel(content),
+					  widget.NewButton("Close", func() {
+						  dlg.Hide()
+					  }),
+			),
+			myWindow.Canvas(),
+		)
+		dlg.Show()
+	}
+
+	askBtn := widget.NewButton("Ask AI", func() {
+		question := askAIInput.Text
+		if question == "" {
+			myApp.SendNotification(&fyne.Notification{
+				Title:   "Ask AI Error",
+				Content: "Please enter a question",
+			})
+			return
+		}
+		answer := askAI(question, allArticles)
+		showSummaryDialog(answer)
+	})
+
+	var lastQuery string
+
+	refreshResultsUI := func() {
+		results.Objects = nil
+		for _, a := range allArticles {
+			link, _ := url.Parse(a.URL)
+			summarizeBtn := widget.NewButtonWithIcon("Summarize", theme.DocumentCreateIcon(), nil)
+			articleText := a.Description
+			if articleText == "" {
+				articleText = a.Title
+			}
+
+			summarizeBtn.OnTapped = func() {
+				summary := summarizeText(articleText)
+				showSummaryDialog(fmt.Sprintf("Summary: %s\nImpact Score: %d\nPolicy Probability: %d%%", summary, a.ImpactScore, a.PolicyProbability))
+			}
+
+			vbox := container.NewVBox(
+				widget.NewHyperlink(fmt.Sprintf("[%s] %s (Impact: %d, Policy: %d%%)", humanTime(a.PublishedAt), a.Title, a.ImpactScore, a.PolicyProbability), link),
+						  widget.NewLabel(a.Description),
+						  summarizeBtn,
+			)
+			results.Add(vbox)
+		}
+		results.Refresh()
+	}
+
 	searchBtn := widget.NewButton("Search", func() {
 		key := keyInput.Text
 		query := queryInput.Text
@@ -205,11 +381,10 @@ func main() {
 			loadMoreBtn.Hide()
 			return
 		}
-		// Reset pagination for new search
 		currentPage = 1
 		allArticles = nil
 		lastQuery = query
-		lastSortAsc = sortAsc
+
 		articles, total, err := fetchNews(key, query, currentPage)
 		if err != nil {
 			results.Objects = []fyne.CanvasObject{widget.NewLabel("❌ Failed to fetch news.")}
@@ -226,58 +401,33 @@ func main() {
 		totalResults = total
 		allArticles = articles
 		sortByTime(allArticles, sortAsc)
-		results.Objects = nil
-		for _, a := range allArticles {
-			link, _ := url.Parse(a.URL)
-			vbox := container.NewVBox(
-				widget.NewHyperlink(fmt.Sprintf("[%s] %s", humanTime(a.PublishedAt), a.Title), link),
-						  widget.NewLabel(a.Description),
-			)
-			results.Add(vbox)
-		}
-		// Show Load More button if more results are available
+		refreshResultsUI()
 		if len(allArticles) < totalResults {
 			loadMoreBtn.Show()
 		} else {
 			loadMoreBtn.Hide()
 		}
-		results.Refresh()
+		saveAPIKey(key)
 	})
 
 	loadMoreBtn.OnTapped = func() {
 		currentPage++
-		articles, total, err := fetchNews(keyInput.Text, lastQuery, currentPage)
+		key := keyInput.Text
+		query := lastQuery
+		articles, _, err := fetchNews(key, query, currentPage)
 		if err != nil {
-			results.Add(widget.NewLabel("❌ Failed to load more news."))
-			results.Refresh()
-			loadMoreBtn.Hide()
+			myApp.SendNotification(&fyne.Notification{
+				Title:   "Load More Error",
+				Content: err.Error(),
+			})
 			return
 		}
-		if len(articles) == 0 {
-			results.Add(widget.NewLabel("📪 No more articles available."))
-			results.Refresh()
-			loadMoreBtn.Hide()
-			return
-		}
-		totalResults = total
 		allArticles = append(allArticles, articles...)
-		sortByTime(allArticles, lastSortAsc)
-		results.Objects = nil
-		for _, a := range allArticles {
-			link, _ := url.Parse(a.URL)
-			vbox := container.NewVBox(
-				widget.NewHyperlink(fmt.Sprintf("[%s] %s", humanTime(a.PublishedAt), a.Title), link),
-						  widget.NewLabel(a.Description),
-			)
-			results.Add(vbox)
-		}
-		// Update Load More button visibility
-		if len(allArticles) < totalResults {
-			loadMoreBtn.Show()
-		} else {
+		sortByTime(allArticles, sortAsc)
+		refreshResultsUI()
+		if len(allArticles) >= totalResults {
 			loadMoreBtn.Hide()
 		}
-		results.Refresh()
 	}
 
 	sortBtn.OnTapped = func() {
@@ -287,49 +437,22 @@ func main() {
 		} else {
 			sortBtn.SetText("Sort: New → Old")
 		}
-		lastSortAsc = sortAsc
-		if len(allArticles) > 0 {
-			sortByTime(allArticles, sortAsc)
-			results.Objects = nil
-			for _, a := range allArticles {
-				link, _ := url.Parse(a.URL)
-				vbox := container.NewVBox(
-					widget.NewHyperlink(fmt.Sprintf("[%s] %s", humanTime(a.PublishedAt), a.Title), link),
-							  widget.NewLabel(a.Description),
-				)
-				results.Add(vbox)
-			}
-			results.Refresh()
-		}
+		sortByTime(allArticles, sortAsc)
+		refreshResultsUI()
 	}
 
-	useOnceBtn := widget.NewButton("Use Once", func() {
-		searchBtn.OnTapped()
-	})
-
-	keepBtn := widget.NewButton("Keep Key", func() {
-		err := saveAPIKey(keyInput.Text)
-		if err != nil {
-			r := container.NewVBox(widget.NewLabel("❌ Failed to save API key."))
-			results.Objects = r.Objects
-			results.Refresh()
-		} else {
-			r := container.NewVBox(widget.NewLabel("✅ API key saved."))
-			results.Objects = r.Objects
-			results.Refresh()
-		}
-	})
-
-	topBar := container.NewVBox(
-		container.New(layout.NewFormLayout(),
-			      widget.NewLabel("API Key:"), keyInput,
-			      widget.NewLabel(""), container.NewHBox(useOnceBtn, keepBtn),
-			      widget.NewLabel("Query:"), queryInput,
-			      widget.NewLabel(""), container.NewHBox(searchBtn, sortBtn, themeBtn),
+	content := container.NewBorder(
+		container.NewVBox(
+			container.NewHBox(keyInput, themeBtn),
+				  container.NewHBox(queryInput, searchBtn, sortBtn, exportBtn, clipboardBtn),
+				  container.NewHBox(askAIInput, askBtn),
 		),
+		loadMoreContainer,
+		nil,
+		nil,
+		scroll,
 	)
 
-	content := container.NewBorder(topBar, loadMoreContainer, nil, nil, scroll)
 	myWindow.SetContent(content)
 	myWindow.ShowAndRun()
 }

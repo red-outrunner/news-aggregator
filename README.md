@@ -76,3 +76,5 @@ to make it mire fresh and seamless like Thanos glove:
 6. measure memory when running
 7. api to web?
 8. build and package it
+9. Ai summary + prompt to figure out narative or sumn like that
+
