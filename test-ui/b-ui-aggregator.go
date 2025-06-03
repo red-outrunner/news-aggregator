@@ -525,7 +525,7 @@ func main() {
 
 			card := widget.NewCard(
 				article.Title,
-				fmt.Sprintf("Published: %s", humanTime(article.PublishedAt)),
+				fmt.Sprintf("Published: %s", humanTime(a.PublishedAt)),
 				cardContent,
 			)
 			results.Add(card)
@@ -581,40 +581,46 @@ func main() {
 		go func(apiKey, searchQuery string) {
 			fetchedArticles, total, err := fetchNews(apiKey, searchQuery, currentPage) 
 			
-			// Corrected: Use myApp.RunOnMain()
-			myApp.RunOnMain(func() {
-				loadingIndicator.Hide()
-				results.Objects = nil 
+			// Use fyne.CurrentApp().RunOnMain() for UI updates from goroutine
+			currentFyneApp := fyne.CurrentApp()
+			if currentFyneApp != nil {
+				currentFyneApp.RunOnMain(func() {
+					loadingIndicator.Hide()
+					results.Objects = nil 
 
-				if err != nil {
-					results.Add(widget.NewLabelWithStyle(fmt.Sprintf("❌ Error fetching news: %v", err), fyne.TextAlignCenter, fyne.TextStyle{Bold: true, Italic: true}))
-					results.Refresh()
-					loadMoreBtn.Hide()
-					allArticles = nil 
-					return
-				}
-				if len(fetchedArticles) == 0 {
-					results.Add(widget.NewLabelWithStyle("🔍 No results found for your query: '"+searchQuery+"'. Try different keywords.", fyne.TextAlignCenter, fyne.TextStyle{Italic: true}))
-					results.Refresh()
-					loadMoreBtn.Hide()
-					allArticles = nil 
-					return
-				}
+					if err != nil {
+						results.Add(widget.NewLabelWithStyle(fmt.Sprintf("❌ Error fetching news: %v", err), fyne.TextAlignCenter, fyne.TextStyle{Bold: true, Italic: true}))
+						results.Refresh()
+						loadMoreBtn.Hide()
+						allArticles = nil 
+						return
+					}
+					if len(fetchedArticles) == 0 {
+						results.Add(widget.NewLabelWithStyle("🔍 No results found for your query: '"+searchQuery+"'. Try different keywords.", fyne.TextAlignCenter, fyne.TextStyle{Italic: true}))
+						results.Refresh()
+						loadMoreBtn.Hide()
+						allArticles = nil 
+						return
+					}
 
-				totalResults = total
-				allArticles = fetchedArticles 
-				sortByTime(allArticles, sortAsc) 
-				refreshResultsUI()
+					totalResults = total
+					allArticles = fetchedArticles 
+					sortByTime(allArticles, sortAsc) 
+					refreshResultsUI()
 
-				if len(allArticles) < totalResults && len(allArticles) > 0 {
-					loadMoreBtn.Show()
-				} else {
-					loadMoreBtn.Hide()
-				}
-				if err := saveAPIKey(key); err != nil { 
-					fmt.Println("Error saving API key:", err) 
-				}
-			})
+					if len(allArticles) < totalResults && len(allArticles) > 0 {
+						loadMoreBtn.Show()
+					} else {
+						loadMoreBtn.Hide()
+					}
+					if err := saveAPIKey(key); err != nil { 
+						fmt.Println("Error saving API key:", err) 
+					}
+				})
+			} else {
+				fmt.Println("Error: Could not get current Fyne app instance to run UI updates on main thread.")
+				// Handle error: UI might not update correctly.
+			}
 		}(key, query)
 	})
 	
@@ -748,29 +754,35 @@ func main() {
 		go func(apiKey, searchQuery string, pageNum int) {
 			fetchedArticles, _, err := fetchNews(apiKey, searchQuery, pageNum) 
 			
-			// Corrected: Use myApp.RunOnMain()
-			myApp.RunOnMain(func(){ 
-				loadMoreBtn.SetText(originalBtnText)
-				loadMoreBtn.Enable()
+			// Use fyne.CurrentApp().RunOnMain() for UI updates from goroutine
+			currentFyneApp := fyne.CurrentApp()
+			if currentFyneApp != nil {
+				currentFyneApp.RunOnMain(func(){ 
+					loadMoreBtn.SetText(originalBtnText)
+					loadMoreBtn.Enable()
 
-				if err != nil {
-					myApp.SendNotification(&fyne.Notification{Title: "Load More Error", Content: err.Error()})
-					currentPage-- 
-					return
-				}
-				if len(fetchedArticles) > 0 { 
-					allArticles = append(allArticles, fetchedArticles...) 
-					sortByTime(allArticles, sortAsc) 
-					refreshResultsUI()
-					scroll.ScrollToBottom() 
-				}
+					if err != nil {
+						myApp.SendNotification(&fyne.Notification{Title: "Load More Error", Content: err.Error()})
+						currentPage-- 
+						return
+					}
+					if len(fetchedArticles) > 0 { 
+						allArticles = append(allArticles, fetchedArticles...) 
+						sortByTime(allArticles, sortAsc) 
+						refreshResultsUI()
+						scroll.ScrollToBottom() 
+					}
 
-				if len(allArticles) >= totalResults || len(fetchedArticles) == 0 { 
-					loadMoreBtn.Hide() 
-				} else {
-					loadMoreBtn.Show()
-				}
-			})
+					if len(allArticles) >= totalResults || len(fetchedArticles) == 0 { 
+						loadMoreBtn.Hide() 
+					} else {
+						loadMoreBtn.Show()
+					}
+				})
+			} else {
+				fmt.Println("Error: Could not get current Fyne app instance to run UI updates on main thread for load more.")
+				// Handle error: UI might not update correctly.
+			}
 		}(key, query, currentPage)
 	}
 	
