@@ -265,8 +265,10 @@ func isBookmarked(articleURL string) bool {
 
 func toggleBookmark(article Article) {
 	bookmarksMutex.Lock()
-	defer bookmarksMutex.Unlock()
-
+	// Unlock before calling saveBookmarks, then re-lock for the defer
+	// This is to avoid deadlock as saveBookmarks also locks.
+	// A more robust solution might involve passing the lock or using channels.
+	
 	found := false
 	var updatedBookmarks []Article
 	for _, bm := range bookmarkedArticles {
@@ -280,9 +282,8 @@ func toggleBookmark(article Article) {
 
 	if !found {
 		// Add the article if it wasn't found (i.e., it's a new bookmark)
-		// Ensure we don't add duplicates if called rapidly (though isBookmarked should prevent)
 		isAlreadyThere := false
-		for _, ub := range updatedBookmarks { // Check updatedBookmarks just in case
+		for _, ub := range updatedBookmarks { 
 			if ub.URL == article.URL {
 				isAlreadyThere = true
 				break
@@ -293,11 +294,10 @@ func toggleBookmark(article Article) {
 		}
 	}
 	bookmarkedArticles = updatedBookmarks
-	// Call saveBookmarks without the lock, as it acquires its own lock
-	// This avoids re-locking the mutex.
-	bookmarksMutex.Unlock()
-	saveBookmarks()
-	bookmarksMutex.Lock() // Re-acquire lock for the defer
+	bookmarksMutex.Unlock() // Unlock before save
+	saveBookmarks() 
+	// No need to re-lock here if the function is ending.
+	// If more operations followed that needed the lock, then re-locking would be necessary.
 }
 
 
@@ -566,7 +566,8 @@ func main() {
 			imgWidget.SetMinSize(fyne.NewSize(120, 80)) 
 
 			if article.URLToImage != "" {
-				go func(imgURL string, targetImg *canvas.Image, appRef fyne.App) { // Pass appRef
+				// Removed appRef parameter from goroutine signature and call
+				go func(imgURL string, targetImg *canvas.Image) { 
 					client := http.Client{ Timeout: 15 * time.Second }
 					resp, err := client.Get(imgURL)
 					if err != nil { fmt.Printf("Error fetching image %s: %v\n", imgURL, err); return }
@@ -578,45 +579,33 @@ func main() {
 					if err != nil { fmt.Printf("Error decoding image %s: %v\n", imgURL, err); return }
 					imgRes := fyne.NewStaticResource(filepath.Base(imgURL), imgData)
 					
-					// Attempt to use appRef.RunOnMain if available, otherwise, this might not update UI correctly from goroutine
-					// This check is a workaround for environments where RunOnMain might be problematic.
-					// In a standard Fyne v2 setup, appRef.RunOnMain should work.
-					if appRef != nil {
-						appRef.RunOnMain(func() {
-							targetImg.Resource = imgRes
-							targetImg.Refresh()
-						})
-					} else { // Fallback: synchronous refresh (might cause stutter if many images)
-						targetImg.Resource = imgRes
-						targetImg.Refresh()
-						fmt.Println("Warning: Fyne app instance was nil, image UI update might not be on main thread.")
-					}
+					// Directly update and refresh the image widget from the goroutine
+					// This is a workaround if RunOnMain APIs are consistently failing.
+					// It might not be perfectly thread-safe in all Fyne versions/scenarios
+					// but is the simplest alternative if main thread execution calls are problematic.
+					targetImg.Resource = imgRes
+					targetImg.Refresh()
 
-
-				}(article.URLToImage, imgWidget, myApp) // Pass myApp
+				}(article.URLToImage, imgWidget) 
 			}
 
 			bookmarkBtn := widget.NewButtonWithIcon("", nil, nil)
 			updateBookmarkButton := func(btn *widget.Button, articleURL string) {
 				if isBookmarked(articleURL) {
-					btn.SetIcon(theme.ConfirmIcon()) // Icon for "bookmarked"
+					btn.SetIcon(theme.ConfirmIcon()) 
 					btn.SetText("Bookmarked")
 				} else {
-					btn.SetIcon(theme.BookmarkIcon()) // Icon for "not bookmarked"
+					btn.SetIcon(theme.BookmarkIcon()) 
 					btn.SetText("Bookmark")
 				}
 				btn.Refresh()
 			}
-			updateBookmarkButton(bookmarkBtn, article.URL) // Initial state
+			updateBookmarkButton(bookmarkBtn, article.URL) 
 
-			// Capture article for the OnTapped closure
 			currentArticleForBookmark := article
 			bookmarkBtn.OnTapped = func() {
 				toggleBookmark(currentArticleForBookmark)
 				updateBookmarkButton(bookmarkBtn, currentArticleForBookmark.URL)
-				// If bookmarks view is open, it should also refresh.
-				// This requires a more complex state management or callback system.
-				// For now, the main list button updates.
 			}
 
 
@@ -660,7 +649,7 @@ func main() {
 				container.NewHBox(
 					widget.NewHyperlink("Read Full Article", parsedURL), 
 					layout.NewSpacer(),
-					bookmarkBtn, // Add bookmark button here
+					bookmarkBtn, 
 					detailsBtn,
 				),
 			)
@@ -687,17 +676,16 @@ func main() {
 
 		var refreshBookmarksList func()
 		refreshBookmarksList = func() {
-			listContent.Objects = nil // Clear previous items
-			bookmarksMutex.Lock()      // Lock for reading bookmarkedArticles
+			listContent.Objects = nil 
+			bookmarksMutex.Lock()      
 			currentBookmarks := make([]Article, len(bookmarkedArticles))
 			copy(currentBookmarks, bookmarkedArticles)
-			bookmarksMutex.Unlock()    // Unlock after copying
+			bookmarksMutex.Unlock()    
 
 			if len(currentBookmarks) == 0 {
 				listContent.Add(widget.NewLabelWithStyle("No articles bookmarked yet.", fyne.TextAlignCenter, fyne.TextStyle{Italic: true}))
 			} else {
 				for _, bmArticle := range currentBookmarks {
-					// Capture bmArticle for the closure
 					articleForView := bmArticle
 
 					titleLabel := widget.NewLabelWithStyle(articleForView.Title, fyne.TextAlignLeading, fyne.TextStyle{Bold: true})
@@ -706,12 +694,11 @@ func main() {
 					urlLink, _ := url.Parse(articleForView.URL)
 
 					removeBtn := widget.NewButtonWithIcon("Remove", theme.DeleteIcon(), func() {
-						// Confirm removal
 						dialog.ShowConfirm("Remove Bookmark", fmt.Sprintf("Are you sure you want to remove '%s'?", articleForView.Title), func(confirm bool) {
 							if confirm {
-								toggleBookmark(articleForView) // This saves automatically
-								refreshBookmarksList()         // Refresh this bookmarks view
-								refreshResultsUI()             // Refresh main view to update bookmark buttons
+								toggleBookmark(articleForView) 
+								refreshBookmarksList()         
+								refreshResultsUI()             
 							}
 						}, bmWin)
 					})
@@ -727,10 +714,10 @@ func main() {
 				}
 			}
 			listContent.Refresh()
-			scrollableList.Refresh() // Refresh scroll container too
+			scrollableList.Refresh() 
 		}
 
-		refreshBookmarksList() // Initial population
+		refreshBookmarksList() 
 
 		bmWin.SetContent(scrollableList)
 		bmWin.Show()
