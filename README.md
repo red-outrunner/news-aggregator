@@ -69,10 +69,10 @@ Built with Go, powered by NewsAPI, and zero bloat. Questions? Drop an issue in t
 
 to make it mire fresh and seamless like Thanos glove:
 1. entering API key on Gui Mode also on console mode
-2. add up sort function on the console
+2. add up sort function on the console - Done
 3. get access to more news site where reading articles cost $free.99c
-4. make the thing a bit pretty
-5. have bookmarks
+4. make the thing a bit pretty - semi-done
+5. have bookmarks -DOne
 6. measure memory when running
 7. api to web page - dread
 8. build and package it
