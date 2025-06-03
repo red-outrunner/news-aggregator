@@ -1,8 +1,12 @@
 package main
 
 import (
+	"bytes"
 	"encoding/json"
 	"fmt"
+	"image"
+	_ "image/jpeg" // Register JPEG decoder
+	_ "image/png"  // Register PNG decoder
 	"io"
 	"net/http"
 	"net/url"
@@ -14,17 +18,19 @@ import (
 
 	"fyne.io/fyne/v2"
 	"fyne.io/fyne/v2/app"
+	"fyne.io/fyne/v2/canvas"
 	"fyne.io/fyne/v2/container"
 	"fyne.io/fyne/v2/layout"
 	"fyne.io/fyne/v2/theme"
 	"fyne.io/fyne/v2/widget"
 )
 
-// Article struct remains the same
+// Article struct updated to include URLToImage
 type Article struct {
 	Title             string `json:"title"`
 	Description       string `json:"description"`
 	URL               string `json:"url"`
+	URLToImage        string `json:"urlToImage"` // Added for image thumbnail
 	PublishedAt       string `json:"publishedAt"`
 	ImpactScore       int    `json:"impactScore,omitempty"`
 	PolicyProbability int    `json:"policyProbability,omitempty"`
@@ -70,7 +76,7 @@ func humanTime(tStr string) string {
 	}
 }
 
-// fetchNews function remains the same
+// fetchNews function remains the same (URLToImage will be unmarshalled automatically)
 func fetchNews(apiKey, query string, page int) ([]Article, int, error) {
 	// Construct the URL for the NewsAPI request
 	// Fetches 18 articles per page, sorted by publication date in English
@@ -459,6 +465,58 @@ func main() {
 			
 			descriptionLabel := widget.NewLabel(cardDescription)
 			descriptionLabel.Wrapping = fyne.TextWrapWord
+			
+			// Create an image widget for the card
+			imgWidget := canvas.NewImageFromResource(nil) // Start with no resource (blank)
+			imgWidget.FillMode = canvas.ImageFillContain
+			imgWidget.SetMinSize(fyne.NewSize(120, 80)) // Set a min size for the image area
+
+			// Asynchronously load the image if URLToImage is available
+			if article.URLToImage != "" {
+				go func(imgURL string, targetImg *canvas.Image) {
+					// Ensure http client has a timeout
+					client := http.Client{
+						Timeout: 15 * time.Second,
+					}
+					resp, err := client.Get(imgURL)
+					if err != nil {
+						fmt.Printf("Error fetching image %s: %v\n", imgURL, err)
+						return
+					}
+					defer resp.Body.Close()
+
+					if resp.StatusCode != http.StatusOK {
+						fmt.Printf("Error fetching image %s: status %s\n", imgURL, resp.Status)
+						return
+					}
+
+					imgData, err := io.ReadAll(resp.Body)
+					if err != nil {
+						fmt.Printf("Error reading image data %s: %v\n", imgURL, err)
+						return
+					}
+
+					// Decode image to ensure it's valid and to potentially use fyne.ImageResource
+					_, _, err = image.Decode(bytes.NewReader(imgData))
+					if err != nil {
+						fmt.Printf("Error decoding image %s: %v\n", imgURL, err)
+						return
+					}
+					
+					// Create a Fyne resource from the image data
+					// Using the URL as the resource name (should be unique enough for this context)
+					imgRes := fyne.NewStaticResource(filepath.Base(imgURL), imgData)
+
+					// Update the UI on the main thread
+					// *** THIS IS THE CRITICAL POINT - ATTEMPTING myApp.RunOnMain ***
+					// If this still fails, the Fyne environment/version is the primary suspect.
+					myApp.RunOnMain(func() {
+						targetImg.Resource = imgRes
+						targetImg.Refresh()
+					})
+
+				}(article.URLToImage, imgWidget)
+			}
 
 
 			detailsBtn := widget.NewButtonWithIcon("Details", theme.InfoIcon(), func() {
@@ -509,7 +567,9 @@ func main() {
 				detailPopUp.Show()
 			})
 
-			cardContent := container.NewVBox(
+			// Card content now includes the image widget
+			// Using a HBox to place image on left and text content on right
+			textContent := container.NewVBox(
 				descriptionLabel,
 				widget.NewSeparator(),
 				container.NewGridWithColumns(2,
@@ -518,17 +578,22 @@ func main() {
 				),
 				widget.NewSeparator(),
 				container.NewHBox(
-					widget.NewHyperlink("Read Full Article", parsedURL), // This uses 'parsedURL' from the loop scope
+					widget.NewHyperlink("Read Full Article", parsedURL), 
 					layout.NewSpacer(), 
 					detailsBtn,
 				),
 			)
+			
+			cardContentWithImage := container.NewBorder(nil, nil, imgWidget, nil, textContent)
+
 
 			card := widget.NewCard(
 				article.Title,
 				fmt.Sprintf("Published: %s", humanTime(article.PublishedAt)),
-				cardContent,
+				cardContentWithImage, // Use the container that includes the image
 			)
+			// card.SetImage(imgWidget) // Alternative: if card supports image directly and layout is preferred
+
 			results.Add(card)
 		}
 		results.Refresh()
