@@ -526,7 +526,6 @@ func main() {
 
 			card := widget.NewCard(
 				article.Title,
-				// Corrected: Use 'article.PublishedAt' instead of 'a.PublishedAt'
 				fmt.Sprintf("Published: %s", humanTime(article.PublishedAt)),
 				cardContent,
 			)
@@ -579,45 +578,41 @@ func main() {
 		loadMoreBtn.Hide()
 		currentPage = 1
 		lastQuery = query
+		
+		// Perform fetch synchronously
+		fetchedArticles, total, err := fetchNews(key, query, currentPage)
+		
+		loadingIndicator.Hide()
+		results.Objects = nil 
 
-		go func(apiKey, searchQuery string) {
-			fetchedArticles, total, err := fetchNews(apiKey, searchQuery, currentPage) 
-			
-			// Reverted to myWindow.RunTransaction()
-			myWindow.RunTransaction(func() {
-				loadingIndicator.Hide()
-				results.Objects = nil 
+		if err != nil {
+			results.Add(widget.NewLabelWithStyle(fmt.Sprintf("❌ Error fetching news: %v", err), fyne.TextAlignCenter, fyne.TextStyle{Bold: true, Italic: true}))
+			results.Refresh()
+			loadMoreBtn.Hide()
+			allArticles = nil 
+			return
+		}
+		if len(fetchedArticles) == 0 {
+			results.Add(widget.NewLabelWithStyle("🔍 No results found for your query: '"+query+"'. Try different keywords.", fyne.TextAlignCenter, fyne.TextStyle{Italic: true}))
+			results.Refresh()
+			loadMoreBtn.Hide()
+			allArticles = nil 
+			return
+		}
 
-				if err != nil {
-					results.Add(widget.NewLabelWithStyle(fmt.Sprintf("❌ Error fetching news: %v", err), fyne.TextAlignCenter, fyne.TextStyle{Bold: true, Italic: true}))
-					results.Refresh()
-					loadMoreBtn.Hide()
-					allArticles = nil 
-					return
-				}
-				if len(fetchedArticles) == 0 {
-					results.Add(widget.NewLabelWithStyle("🔍 No results found for your query: '"+searchQuery+"'. Try different keywords.", fyne.TextAlignCenter, fyne.TextStyle{Italic: true}))
-					results.Refresh()
-					loadMoreBtn.Hide()
-					allArticles = nil 
-					return
-				}
+		totalResults = total
+		allArticles = fetchedArticles 
+		sortByTime(allArticles, sortAsc) 
+		refreshResultsUI()
 
-				totalResults = total
-				allArticles = fetchedArticles 
-				sortByTime(allArticles, sortAsc) 
-				refreshResultsUI()
-
-				if len(allArticles) < totalResults && len(allArticles) > 0 {
-					loadMoreBtn.Show()
-				} else {
-					loadMoreBtn.Hide()
-				}
-				if err := saveAPIKey(key); err != nil { 
-					fmt.Println("Error saving API key:", err) 
-				}
-			})
-		}(key, query)
+		if len(allArticles) < totalResults && len(allArticles) > 0 {
+			loadMoreBtn.Show()
+		} else {
+			loadMoreBtn.Hide()
+		}
+		if errSave := saveAPIKey(key); errSave != nil { 
+			fmt.Println("Error saving API key:", errSave) 
+		}
 	})
 	
 	queryInput.OnSubmitted = func(s string) { 
@@ -747,33 +742,29 @@ func main() {
 		loadMoreBtn.SetText("Loading More...")
 		loadMoreBtn.Disable()
 
-		go func(apiKey, searchQuery string, pageNum int) {
-			fetchedArticles, _, err := fetchNews(apiKey, searchQuery, pageNum) 
-			
-			// Reverted to myWindow.RunTransaction()
-			myWindow.RunTransaction(func(){ 
-				loadMoreBtn.SetText(originalBtnText)
-				loadMoreBtn.Enable()
+		// Perform fetch synchronously
+		fetchedArticles, _, err := fetchNews(key, query, currentPage)
+		
+		loadMoreBtn.SetText(originalBtnText)
+		loadMoreBtn.Enable()
 
-				if err != nil {
-					myApp.SendNotification(&fyne.Notification{Title: "Load More Error", Content: err.Error()})
-					currentPage-- 
-					return
-				}
-				if len(fetchedArticles) > 0 { 
-					allArticles = append(allArticles, fetchedArticles...) 
-					sortByTime(allArticles, sortAsc) 
-					refreshResultsUI()
-					scroll.ScrollToBottom() 
-				}
+		if err != nil {
+			myApp.SendNotification(&fyne.Notification{Title: "Load More Error", Content: err.Error()})
+			currentPage-- 
+			return
+		}
+		if len(fetchedArticles) > 0 { 
+			allArticles = append(allArticles, fetchedArticles...) 
+			sortByTime(allArticles, sortAsc) 
+			refreshResultsUI()
+			scroll.ScrollToBottom() 
+		}
 
-				if len(allArticles) >= totalResults || len(fetchedArticles) == 0 { 
-					loadMoreBtn.Hide() 
-				} else {
-					loadMoreBtn.Show()
-				}
-			})
-		}(key, query, currentPage)
+		if len(allArticles) >= totalResults || len(fetchedArticles) == 0 { 
+			loadMoreBtn.Hide() 
+		} else {
+			loadMoreBtn.Show()
+		}
 	}
 	
 	topControls := container.NewVBox(
