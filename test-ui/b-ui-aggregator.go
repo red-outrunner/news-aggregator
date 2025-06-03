@@ -595,7 +595,8 @@ func main() {
 					btn.SetIcon(theme.ConfirmIcon()) 
 					btn.SetText("Bookmarked")
 				} else {
-					btn.SetIcon(theme.BookmarkIcon()) 
+					// Corrected: Use theme.StarIcon() as a fallback for theme.BookmarkIcon()
+					btn.SetIcon(theme.StarIcon()) 
 					btn.SetText("Bookmark")
 				}
 				btn.Refresh()
