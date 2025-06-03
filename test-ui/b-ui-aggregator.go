@@ -436,7 +436,7 @@ func main() {
 		}
 
 		for i := range allArticles {
-			article := allArticles[i] 
+			article := allArticles[i] // Important: capture range variable for closures
 
 			parsedURL, err := url.Parse(article.URL)
 			if err != nil {
@@ -462,24 +462,25 @@ func main() {
 
 
 			detailsBtn := widget.NewButtonWithIcon("Details", theme.InfoIcon(), func() {
-				currentArticle := article 
+				// Use the 'article' captured from the loop for this specific button's closure
+				currentArticleForDetail := article 
 
-				fullSummary := summarizeText(currentArticle.Description)
-				if strings.TrimSpace(currentArticle.Description) == "" {
+				fullSummary := summarizeText(currentArticleForDetail.Description)
+				if strings.TrimSpace(currentArticleForDetail.Description) == "" {
 					fullSummary = "Full description is not available."
 				}
 				
-				currentArticleParsedURL, _ := url.Parse(currentArticle.URL)
+				currentArticleParsedURL, _ := url.Parse(currentArticleForDetail.URL)
 
 
 				content := container.NewVBox(
-					widget.NewLabelWithStyle(currentArticle.Title, fyne.TextAlignLeading, fyne.TextStyle{Bold: true}),
+					widget.NewLabelWithStyle(currentArticleForDetail.Title, fyne.TextAlignLeading, fyne.TextStyle{Bold: true}),
 					widget.NewSeparator(),
 					widget.NewLabelWithStyle("Summary:", fyne.TextAlignLeading, fyne.TextStyle{Bold: true}),
 					widget.NewLabel(fullSummary), 
 					widget.NewSeparator(),
-					widget.NewLabel(fmt.Sprintf("Impact Score: %d/100", currentArticle.ImpactScore)),
-					widget.NewLabel(fmt.Sprintf("Policy Relevance: %d%%", currentArticle.PolicyProbability)), 
+					widget.NewLabel(fmt.Sprintf("Impact Score: %d/100", currentArticleForDetail.ImpactScore)),
+					widget.NewLabel(fmt.Sprintf("Policy Relevance: %d%%", currentArticleForDetail.PolicyProbability)), 
 					widget.NewSeparator(),
 					widget.NewHyperlink("Open Original Article", currentArticleParsedURL),
 				)
@@ -517,7 +518,7 @@ func main() {
 				),
 				widget.NewSeparator(),
 				container.NewHBox(
-					widget.NewHyperlink("Read Full Article", parsedURL),
+					widget.NewHyperlink("Read Full Article", parsedURL), // This uses 'parsedURL' from the loop scope
 					layout.NewSpacer(), 
 					detailsBtn,
 				),
@@ -525,7 +526,8 @@ func main() {
 
 			card := widget.NewCard(
 				article.Title,
-				fmt.Sprintf("Published: %s", humanTime(a.PublishedAt)),
+				// Corrected: Use 'article.PublishedAt' instead of 'a.PublishedAt'
+				fmt.Sprintf("Published: %s", humanTime(article.PublishedAt)),
 				cardContent,
 			)
 			results.Add(card)
@@ -581,46 +583,40 @@ func main() {
 		go func(apiKey, searchQuery string) {
 			fetchedArticles, total, err := fetchNews(apiKey, searchQuery, currentPage) 
 			
-			// Use fyne.CurrentApp().RunOnMain() for UI updates from goroutine
-			currentFyneApp := fyne.CurrentApp()
-			if currentFyneApp != nil {
-				currentFyneApp.RunOnMain(func() {
-					loadingIndicator.Hide()
-					results.Objects = nil 
+			// Reverted to myWindow.RunTransaction()
+			myWindow.RunTransaction(func() {
+				loadingIndicator.Hide()
+				results.Objects = nil 
 
-					if err != nil {
-						results.Add(widget.NewLabelWithStyle(fmt.Sprintf("❌ Error fetching news: %v", err), fyne.TextAlignCenter, fyne.TextStyle{Bold: true, Italic: true}))
-						results.Refresh()
-						loadMoreBtn.Hide()
-						allArticles = nil 
-						return
-					}
-					if len(fetchedArticles) == 0 {
-						results.Add(widget.NewLabelWithStyle("🔍 No results found for your query: '"+searchQuery+"'. Try different keywords.", fyne.TextAlignCenter, fyne.TextStyle{Italic: true}))
-						results.Refresh()
-						loadMoreBtn.Hide()
-						allArticles = nil 
-						return
-					}
+				if err != nil {
+					results.Add(widget.NewLabelWithStyle(fmt.Sprintf("❌ Error fetching news: %v", err), fyne.TextAlignCenter, fyne.TextStyle{Bold: true, Italic: true}))
+					results.Refresh()
+					loadMoreBtn.Hide()
+					allArticles = nil 
+					return
+				}
+				if len(fetchedArticles) == 0 {
+					results.Add(widget.NewLabelWithStyle("🔍 No results found for your query: '"+searchQuery+"'. Try different keywords.", fyne.TextAlignCenter, fyne.TextStyle{Italic: true}))
+					results.Refresh()
+					loadMoreBtn.Hide()
+					allArticles = nil 
+					return
+				}
 
-					totalResults = total
-					allArticles = fetchedArticles 
-					sortByTime(allArticles, sortAsc) 
-					refreshResultsUI()
+				totalResults = total
+				allArticles = fetchedArticles 
+				sortByTime(allArticles, sortAsc) 
+				refreshResultsUI()
 
-					if len(allArticles) < totalResults && len(allArticles) > 0 {
-						loadMoreBtn.Show()
-					} else {
-						loadMoreBtn.Hide()
-					}
-					if err := saveAPIKey(key); err != nil { 
-						fmt.Println("Error saving API key:", err) 
-					}
-				})
-			} else {
-				fmt.Println("Error: Could not get current Fyne app instance to run UI updates on main thread.")
-				// Handle error: UI might not update correctly.
-			}
+				if len(allArticles) < totalResults && len(allArticles) > 0 {
+					loadMoreBtn.Show()
+				} else {
+					loadMoreBtn.Hide()
+				}
+				if err := saveAPIKey(key); err != nil { 
+					fmt.Println("Error saving API key:", err) 
+				}
+			})
 		}(key, query)
 	})
 	
@@ -754,35 +750,29 @@ func main() {
 		go func(apiKey, searchQuery string, pageNum int) {
 			fetchedArticles, _, err := fetchNews(apiKey, searchQuery, pageNum) 
 			
-			// Use fyne.CurrentApp().RunOnMain() for UI updates from goroutine
-			currentFyneApp := fyne.CurrentApp()
-			if currentFyneApp != nil {
-				currentFyneApp.RunOnMain(func(){ 
-					loadMoreBtn.SetText(originalBtnText)
-					loadMoreBtn.Enable()
+			// Reverted to myWindow.RunTransaction()
+			myWindow.RunTransaction(func(){ 
+				loadMoreBtn.SetText(originalBtnText)
+				loadMoreBtn.Enable()
 
-					if err != nil {
-						myApp.SendNotification(&fyne.Notification{Title: "Load More Error", Content: err.Error()})
-						currentPage-- 
-						return
-					}
-					if len(fetchedArticles) > 0 { 
-						allArticles = append(allArticles, fetchedArticles...) 
-						sortByTime(allArticles, sortAsc) 
-						refreshResultsUI()
-						scroll.ScrollToBottom() 
-					}
+				if err != nil {
+					myApp.SendNotification(&fyne.Notification{Title: "Load More Error", Content: err.Error()})
+					currentPage-- 
+					return
+				}
+				if len(fetchedArticles) > 0 { 
+					allArticles = append(allArticles, fetchedArticles...) 
+					sortByTime(allArticles, sortAsc) 
+					refreshResultsUI()
+					scroll.ScrollToBottom() 
+				}
 
-					if len(allArticles) >= totalResults || len(fetchedArticles) == 0 { 
-						loadMoreBtn.Hide() 
-					} else {
-						loadMoreBtn.Show()
-					}
-				})
-			} else {
-				fmt.Println("Error: Could not get current Fyne app instance to run UI updates on main thread for load more.")
-				// Handle error: UI might not update correctly.
-			}
+				if len(allArticles) >= totalResults || len(fetchedArticles) == 0 { 
+					loadMoreBtn.Hide() 
+				} else {
+					loadMoreBtn.Show()
+				}
+			})
 		}(key, query, currentPage)
 	}
 	
