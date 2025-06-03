@@ -304,17 +304,18 @@ func min(a, b int) int {
 	return b
 }
 
-// askAI function. Corrected to use the 'articles' parameter for length calculation.
-func askAI(question string, articles []Article) string { // articles is the parameter to use
+// askAI function. Simplified "and more" logic.
+func askAI(question string, articles []Article) string {
 	searchQuery := strings.ToLower(strings.TrimSpace(question))
 	if searchQuery == "" {
 		return "Please ask a specific question."
 	}
 
-	var relevantArticlesOutput []string // Renamed to avoid confusion with the parameter
+	var relevantArticlesOutput []string
 	questionWords := strings.Fields(searchQuery)
+	initialRelevantCount := 0 // To track how many relevant articles were found before slicing
 
-	for _, a := range articles { // Iterate over the passed 'articles'
+	for _, a := range articles {
 		content := strings.ToLower(a.Title + " " + a.Description)
 		matchCount := 0
 		for _, qWord := range questionWords {
@@ -328,50 +329,17 @@ func askAI(question string, articles []Article) string { // articles is the para
 				summary = a.Title
 			}
 			relevantArticlesOutput = append(relevantArticlesOutput, fmt.Sprintf("- %s: %s", a.Title, summary))
+			initialRelevantCount++
 		}
 	}
 
 	if len(relevantArticlesOutput) == 0 {
 		return "No relevant information found in the currently loaded articles for your question: '" + question + "'"
 	}
-	// Use the 'articles' parameter (which is the 'allArticles' from main) for the "more similar articles" count
-	if len(relevantArticlesOutput) > 5 {
-		// Calculate how many actual articles were found beyond the first 5 displayed
-		// The total number of articles available for this question is len(articles)
-		// The number of articles that matched the query is len(relevantArticlesOutput) before truncation
-		// This logic might be slightly off if relevantArticlesOutput was much larger than len(articles) (not possible here)
-		// For simplicity, if we show 5, and there were more matches than 5, say "and more..."
-		// Or, more accurately, if allArticles (passed as 'articles') is the source:
-		numMore := 0
-		if len(articles) > 5 && len(relevantArticlesOutput) >=5 { // ensure we actually have more articles than displayed
-			numMore = len(articles) - 5 // This should be len(relevantArticlesOutput before truncation) - 5
-                                        // Let's stick to a simpler "and more..." or refine if needed.
-                                        // The original error was using global allArticles, now we use passed 'articles'
-                                        // If we displayed 5 from relevantArticlesOutput, and relevantArticlesOutput had more,
-                                        // then it's len(original_relevantArticlesOutput_before_slicing) - 5
-                                        // For now, let's use the count of total articles available in the current view.
-            // If more than 5 relevant articles were found initially
-            // This part of the logic might still be tricky. The original error was about using the global `allArticles`.
-            // The count should be based on how many *relevant* articles were found beyond the 5 displayed.
-            // Let's assume `len(articles)` refers to `allArticles` from main.
-            // If `relevantArticlesOutput` (before slicing) had, say, 10 items, and we slice to 5, then there are 5 more.
-            // This requires knowing the length of relevantArticlesOutput *before* it was sliced.
-            // A simpler approach:
-            originalRelevantCount := 0
-            // Recalculate or store originalRelevantCount if precise count is needed.
-            // For now, just indicate more exist if the source list `articles` is larger than 5.
-            if len(articles) > 5 {
-                 relevantArticlesOutput = relevantArticlesOutput[:5]
-                 relevantArticlesOutput = append(relevantArticlesOutput, fmt.Sprintf("\n(And potentially %d more relevant articles in the full list...)", len(articles)-5))
-            } else {
-                 // If less than or equal to 5 relevant articles, no need to truncate or add "and more"
-            }
 
-		} else if len(relevantArticlesOutput) > 5 { // If exactly relevantArticlesOutput had more than 5
-            relevantArticlesOutput = relevantArticlesOutput[:5]
-            relevantArticlesOutput = append(relevantArticlesOutput, "\n(And more...)") // Generic "and more"
-        }
-
+	if initialRelevantCount > 5 {
+		relevantArticlesOutput = relevantArticlesOutput[:5] // Slice to show only the first 5
+		relevantArticlesOutput = append(relevantArticlesOutput, fmt.Sprintf("\n(And %d more relevant articles found...)", initialRelevantCount-5))
 	}
 
 	return "Based on the articles, here's some information related to '" + question + "':\n\n" + strings.Join(relevantArticlesOutput, "\n\n")
@@ -608,14 +576,13 @@ func main() {
 		
 		loadMoreBtn.Hide()
 		currentPage = 1
-		// allArticles = nil // Keep previous allArticles for askAI until new ones are fetched
 		lastQuery = query
 
 		go func(apiKey, searchQuery string) {
-			fetchedArticles, total, err := fetchNews(apiKey, searchQuery, currentPage) // Store in new variable
+			fetchedArticles, total, err := fetchNews(apiKey, searchQuery, currentPage) 
 			
-			// Corrected: Use fyne.CurrentApp().Driver().RunOnMain()
-			fyne.CurrentApp().Driver().RunOnMain(func() {
+			// Corrected: Use myApp.RunOnMain()
+			myApp.RunOnMain(func() {
 				loadingIndicator.Hide()
 				results.Objects = nil 
 
@@ -623,19 +590,19 @@ func main() {
 					results.Add(widget.NewLabelWithStyle(fmt.Sprintf("❌ Error fetching news: %v", err), fyne.TextAlignCenter, fyne.TextStyle{Bold: true, Italic: true}))
 					results.Refresh()
 					loadMoreBtn.Hide()
-					allArticles = nil // Clear articles on error
+					allArticles = nil 
 					return
 				}
 				if len(fetchedArticles) == 0 {
 					results.Add(widget.NewLabelWithStyle("🔍 No results found for your query: '"+searchQuery+"'. Try different keywords.", fyne.TextAlignCenter, fyne.TextStyle{Italic: true}))
 					results.Refresh()
 					loadMoreBtn.Hide()
-					allArticles = nil // Clear articles if none found
+					allArticles = nil 
 					return
 				}
 
 				totalResults = total
-				allArticles = fetchedArticles // Assign fetched articles
+				allArticles = fetchedArticles 
 				sortByTime(allArticles, sortAsc) 
 				refreshResultsUI()
 
@@ -689,11 +656,11 @@ func main() {
 			showAIResponseDialog("Ask AI Error", "Please enter a question to ask the AI.")
 			return
 		}
-		if len(allArticles) == 0 { // Check global allArticles here, as it holds the current view
+		if len(allArticles) == 0 { 
 			showAIResponseDialog("Ask AI Info", "No articles loaded. Please perform a search first.")
 			return
 		}
-		answer := askAI(question, allArticles) // Pass the currently loaded allArticles
+		answer := askAI(question, allArticles) 
 		showAIResponseDialog("AI Response", answer)
 	})
 	askAIInput.OnSubmitted = func(s string) { 
@@ -779,10 +746,10 @@ func main() {
 		loadMoreBtn.Disable()
 
 		go func(apiKey, searchQuery string, pageNum int) {
-			fetchedArticles, _, err := fetchNews(apiKey, searchQuery, pageNum) // Store in new variable
+			fetchedArticles, _, err := fetchNews(apiKey, searchQuery, pageNum) 
 			
-			// Corrected: Use fyne.CurrentApp().Driver().RunOnMain()
-			fyne.CurrentApp().Driver().RunOnMain(func(){ 
+			// Corrected: Use myApp.RunOnMain()
+			myApp.RunOnMain(func(){ 
 				loadMoreBtn.SetText(originalBtnText)
 				loadMoreBtn.Enable()
 
@@ -791,14 +758,14 @@ func main() {
 					currentPage-- 
 					return
 				}
-				if len(fetchedArticles) > 0 { // Use fetchedArticles
-					allArticles = append(allArticles, fetchedArticles...) // Append new to existing
+				if len(fetchedArticles) > 0 { 
+					allArticles = append(allArticles, fetchedArticles...) 
 					sortByTime(allArticles, sortAsc) 
 					refreshResultsUI()
 					scroll.ScrollToBottom() 
 				}
 
-				if len(allArticles) >= totalResults || len(fetchedArticles) == 0 { // Check fetchedArticles for empty page
+				if len(allArticles) >= totalResults || len(fetchedArticles) == 0 { 
 					loadMoreBtn.Hide() 
 				} else {
 					loadMoreBtn.Show()
