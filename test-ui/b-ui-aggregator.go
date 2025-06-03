@@ -14,12 +14,14 @@ import (
 	"path/filepath"
 	"sort"
 	"strings"
+	"sync"
 	"time"
 
 	"fyne.io/fyne/v2"
 	"fyne.io/fyne/v2/app"
 	"fyne.io/fyne/v2/canvas"
 	"fyne.io/fyne/v2/container"
+	"fyne.io/fyne/v2/dialog"
 	"fyne.io/fyne/v2/layout"
 	"fyne.io/fyne/v2/theme"
 	"fyne.io/fyne/v2/widget"
@@ -34,6 +36,7 @@ type Article struct {
 	PublishedAt       string `json:"publishedAt"`
 	ImpactScore       int    `json:"impactScore,omitempty"`
 	PolicyProbability int    `json:"policyProbability,omitempty"`
+	// IsBookmarked bool // Not strictly needed in struct if we check against a separate list by URL
 }
 
 // NewsResponse struct remains the same
@@ -42,6 +45,14 @@ type NewsResponse struct {
 	TotalResults int       `json:"totalResults"`
 	Articles     []Article `json:"articles"`
 }
+
+var (
+	bookmarkedArticles []Article
+	bookmarksMutex     sync.Mutex // To protect concurrent access to bookmarkedArticles
+	bookmarksFilePath  string
+)
+
+const bookmarksFilename = "news_aggregator_bookmarks.json"
 
 // sortByTime function remains the same
 func sortByTime(articles []Article, ascending bool) {
@@ -78,8 +89,6 @@ func humanTime(tStr string) string {
 
 // fetchNews function remains the same (URLToImage will be unmarshalled automatically)
 func fetchNews(apiKey, query string, page int) ([]Article, int, error) {
-	// Construct the URL for the NewsAPI request
-	// Fetches 18 articles per page, sorted by publication date in English
 	apiURL := fmt.Sprintf("https://newsapi.org/v2/everything?q=%s&sortBy=publishedAt&language=en&pageSize=18&page=%d&apiKey=%s", url.QueryEscape(query), page, apiKey)
 	resp, err := http.Get(apiURL)
 	if err != nil {
@@ -102,24 +111,19 @@ func fetchNews(apiKey, query string, page int) ([]Article, int, error) {
 		return nil, 0, fmt.Errorf("failed to parse news JSON: %w. Response: %s", err, string(body))
 	}
 	if newsResponse.Status != "ok" {
-		// NewsAPI often includes a 'message' field on error
 		errMsg := newsResponse.Status
-		// Attempt to get a more specific error message if available
-		// Check if newsResponse can be asserted to map[string]interface{} to access "message"
 		var rawResponse map[string]interface{}
-		if json.Unmarshal(body, &rawResponse) == nil { // Try to unmarshal into a generic map
+		if json.Unmarshal(body, &rawResponse) == nil {
 			if message, ok := rawResponse["message"].(string); ok {
 				errMsg = message
 			}
 		} else if len(newsResponse.Articles) > 0 && newsResponse.Articles[0].Title != "" &&
-			(strings.Contains(strings.ToLower(newsResponse.Articles[0].Title), "error") || newsResponse.Articles[0].Description == "") { // Corrected: newsResponse.Articles[0].Description == ""
-			// Heuristic for error message in API when status is ok but it's an error message like rate limit
+			(strings.Contains(strings.ToLower(newsResponse.Articles[0].Title), "error") || newsResponse.Articles[0].Description == "") {
 			errMsg = newsResponse.Articles[0].Title
 		}
 		return nil, 0, fmt.Errorf("API error: %s. Full response: %s", errMsg, string(body))
 	}
 
-	// Calculate impact and policy scores for each article
 	for i := range newsResponse.Articles {
 		newsResponse.Articles[i].ImpactScore = calculateImpactScore(newsResponse.Articles[i].Title + " " + newsResponse.Articles[i].Description)
 		newsResponse.Articles[i].PolicyProbability = calculatePolicyProbability(newsResponse.Articles[i].Title + " " + newsResponse.Articles[i].Description)
@@ -196,25 +200,121 @@ func saveThemePreference(isDark bool) error {
 	return os.WriteFile(path, []byte(theme), 0600)
 }
 
+// --- Bookmark Functions ---
+func setupBookmarksPath() {
+	home, err := os.UserHomeDir()
+	if err != nil {
+		fmt.Println("Error getting user home dir for bookmarks:", err)
+		// Fallback to current directory if home cannot be determined
+		bookmarksFilePath = bookmarksFilename
+		return
+	}
+	configDir := filepath.Join(home, ".config", "newsaggregator")
+	if err := os.MkdirAll(configDir, 0700); err != nil {
+		fmt.Println("Error creating config directory for bookmarks:", err)
+		bookmarksFilePath = bookmarksFilename
+		return
+	}
+	bookmarksFilePath = filepath.Join(configDir, bookmarksFilename)
+}
+
+func loadBookmarks() {
+	bookmarksMutex.Lock()
+	defer bookmarksMutex.Unlock()
+
+	data, err := os.ReadFile(bookmarksFilePath)
+	if err != nil {
+		if os.IsNotExist(err) {
+			bookmarkedArticles = []Article{} // Initialize if file doesn't exist
+			return
+		}
+		fmt.Println("Error reading bookmarks file:", err)
+		bookmarkedArticles = []Article{}
+		return
+	}
+	if err := json.Unmarshal(data, &bookmarkedArticles); err != nil {
+		fmt.Println("Error unmarshalling bookmarks:", err)
+		bookmarkedArticles = []Article{}
+	}
+}
+
+func saveBookmarks() {
+	bookmarksMutex.Lock()
+	defer bookmarksMutex.Unlock()
+
+	data, err := json.MarshalIndent(bookmarkedArticles, "", "  ")
+	if err != nil {
+		fmt.Println("Error marshalling bookmarks:", err)
+		return
+	}
+	if err := os.WriteFile(bookmarksFilePath, data, 0600); err != nil {
+		fmt.Println("Error writing bookmarks file:", err)
+	}
+}
+
+func isBookmarked(articleURL string) bool {
+	bookmarksMutex.Lock()
+	defer bookmarksMutex.Unlock()
+	for _, bm := range bookmarkedArticles {
+		if bm.URL == articleURL {
+			return true
+		}
+	}
+	return false
+}
+
+func toggleBookmark(article Article) {
+	bookmarksMutex.Lock()
+	defer bookmarksMutex.Unlock()
+
+	found := false
+	var updatedBookmarks []Article
+	for _, bm := range bookmarkedArticles {
+		if bm.URL == article.URL {
+			found = true
+			// Skip adding it to updatedBookmarks to remove it
+		} else {
+			updatedBookmarks = append(updatedBookmarks, bm)
+		}
+	}
+
+	if !found {
+		// Add the article if it wasn't found (i.e., it's a new bookmark)
+		// Ensure we don't add duplicates if called rapidly (though isBookmarked should prevent)
+		isAlreadyThere := false
+		for _, ub := range updatedBookmarks { // Check updatedBookmarks just in case
+			if ub.URL == article.URL {
+				isAlreadyThere = true
+				break
+			}
+		}
+		if !isAlreadyThere {
+			updatedBookmarks = append(updatedBookmarks, article)
+		}
+	}
+	bookmarkedArticles = updatedBookmarks
+	// Call saveBookmarks without the lock, as it acquires its own lock
+	// This avoids re-locking the mutex.
+	bookmarksMutex.Unlock()
+	saveBookmarks()
+	bookmarksMutex.Lock() // Re-acquire lock for the defer
+}
+
+
 // summarizeText function remains the same
-// It creates a summary by taking the first few sentences of the text.
 func summarizeText(text string) string {
 	if strings.TrimSpace(text) == "" {
 		return "No content available to summarize."
 	}
-	// Split by common sentence delimiters. Handle cases like "Mr. Jones" correctly.
-	// This regex is a bit more robust for sentence splitting.
 	sentences := strings.FieldsFunc(text, func(r rune) bool {
 		return r == '.' || r == '!' || r == '?'
 	})
 
 	if len(sentences) == 0 {
-		// If no sentences found (e.g. text without punctuation), return a snippet
 		maxLength := 150
 		if len(text) <= maxLength {
 			return text
 		}
-		// Try to break at a space for cleaner truncation
 		if idx := strings.LastIndex(text[:maxLength], " "); idx != -1 {
 			return text[:idx] + "..."
 		}
@@ -223,37 +323,32 @@ func summarizeText(text string) string {
 
 	var summary strings.Builder
 	sentenceCount := 0
-	desiredSentences := 2 // Number of sentences for the summary
+	desiredSentences := 2 
 
 	originalTextIndex := 0
 	for _, s := range sentences {
 		trimmedSentence := strings.TrimSpace(s)
 		if trimmedSentence != "" {
-			// Find the sentence in the original text to get the correct punctuation
 			actualSentenceStart := strings.Index(text[originalTextIndex:], trimmedSentence)
 			if actualSentenceStart != -1 {
 				actualSentenceEnd := actualSentenceStart + len(trimmedSentence)
-				summary.WriteString(text[originalTextIndex+actualSentenceStart : originalTextIndex+actualSentenceEnd]) // Write the sentence itself
-
-				// Append the punctuation if it exists
+				summary.WriteString(text[originalTextIndex+actualSentenceStart : originalTextIndex+actualSentenceEnd]) 
 				if originalTextIndex+actualSentenceEnd < len(text) {
 					punctuation := text[originalTextIndex+actualSentenceEnd]
 					if punctuation == '.' || punctuation == '!' || punctuation == '?' {
 						summary.WriteRune(rune(punctuation))
 					} else {
-						summary.WriteString(".") // Default if no clear punctuation found immediately after
+						summary.WriteString(".") 
 					}
 				} else {
-					summary.WriteString(".") // Sentence ends at text end
+					summary.WriteString(".") 
 				}
-				originalTextIndex += actualSentenceEnd + 1 // Move past this sentence and its punctuation
+				originalTextIndex += actualSentenceEnd + 1 
 			} else {
-				// Fallback if sentence not found (should be rare with FieldsFunc)
 				summary.WriteString(trimmedSentence)
 				summary.WriteString(".")
 			}
-
-			summary.WriteString(" ") // Add space between sentences
+			summary.WriteString(" ") 
 			sentenceCount++
 			if sentenceCount >= desiredSentences {
 				break
@@ -262,7 +357,7 @@ func summarizeText(text string) string {
 	}
 
 	result := strings.TrimSpace(summary.String())
-	if result == "" { // Fallback if all sentences were whitespace
+	if result == "" { 
 		maxLength := 150
 		if len(text) <= maxLength {
 			return text
@@ -283,10 +378,10 @@ func calculateImpactScore(text string) int {
 	textLower := strings.ToLower(text)
 	for _, k := range keywords {
 		if strings.Contains(textLower, k) {
-			score += 7 // Adjusted score per keyword for finer granularity
+			score += 7 
 		}
 	}
-	return min(100, score) // Ensure score doesn't exceed 100
+	return min(100, score) 
 }
 
 // calculatePolicyProbability function remains the same
@@ -296,10 +391,10 @@ func calculatePolicyProbability(text string) int {
 	textLower := strings.ToLower(text)
 	for _, k := range keywords {
 		if strings.Contains(textLower, k) {
-			score += 10 // Adjusted score per keyword
+			score += 10 
 		}
 	}
-	return min(100, score) // Ensure score doesn't exceed 100
+	return min(100, score) 
 }
 
 // min function remains the same
@@ -319,7 +414,7 @@ func askAI(question string, articles []Article) string {
 
 	var relevantArticlesOutput []string
 	questionWords := strings.Fields(searchQuery)
-	initialRelevantCount := 0 // To track how many relevant articles were found before slicing
+	initialRelevantCount := 0 
 
 	for _, a := range articles {
 		content := strings.ToLower(a.Title + " " + a.Description)
@@ -344,7 +439,7 @@ func askAI(question string, articles []Article) string {
 	}
 
 	if initialRelevantCount > 5 {
-		relevantArticlesOutput = relevantArticlesOutput[:5] // Slice to show only the first 5
+		relevantArticlesOutput = relevantArticlesOutput[:5] 
 		relevantArticlesOutput = append(relevantArticlesOutput, fmt.Sprintf("\n(And %d more relevant articles found...)", initialRelevantCount-5))
 	}
 
@@ -354,9 +449,12 @@ func askAI(question string, articles []Article) string {
 
 // Main application function
 func main() {
-	myApp := app.NewWithID("com.example.newsaggregator.deluxe") // Added AppID
+	myApp := app.NewWithID("com.example.newsaggregator.deluxe.v2") // Updated AppID
 	myWindow := myApp.NewWindow("News Aggregator Deluxe")
-	myWindow.Resize(fyne.NewSize(850, 750)) // Slightly wider for cards and more content
+	myWindow.Resize(fyne.NewSize(900, 800)) // Slightly larger for new button
+
+	setupBookmarksPath()
+	loadBookmarks() // Load bookmarks at startup
 
 	// Load theme preference
 	isDarkTheme := loadThemePreference()
@@ -374,16 +472,14 @@ func main() {
 	sortAsc := false // Default sort: Newest first
 
 	// --- UI Elements ---
-	// API Key Input
-	keyInput := widget.NewPasswordEntry() // Use PasswordEntry for API keys
+	keyInput := widget.NewPasswordEntry() 
 	keyInput.SetPlaceHolder("Enter NewsAPI key...")
 	apiKey := loadSavedKey()
 	if apiKey != "" {
 		keyInput.SetText(apiKey)
 	}
 
-	// Theme Toggle Button
-	themeBtn := widget.NewButtonWithIcon("", theme.ColorPaletteIcon(), nil) // Using a general palette icon
+	themeBtn := widget.NewButtonWithIcon("", theme.ColorPaletteIcon(), nil) 
 	updateThemeButtonText := func(isDark bool) {
 		if isDark {
 			themeBtn.SetText("Set Light Theme")
@@ -392,7 +488,7 @@ func main() {
 		}
 		themeBtn.Refresh()
 	}
-	updateThemeButtonText(isDarkTheme) // Initial text
+	updateThemeButtonText(isDarkTheme) 
 
 	themeBtn.OnTapped = func() {
 		isDarkTheme = !isDarkTheme
@@ -408,12 +504,9 @@ func main() {
 	apiKeyLabel := widget.NewLabel("API Key:")
 	apiKeyRow := container.NewBorder(nil, nil, apiKeyLabel, themeBtn, keyInput)
 
-
-	// Search Input and Button
 	queryInput := widget.NewEntry()
 	queryInput.SetPlaceHolder("Search news topics (e.g., 'Go programming', 'AI breakthroughs')")
 
-	// Results container and scroll
 	results := container.NewVBox() 
 	results.Add(widget.NewLabelWithStyle("Enter your API key and a search query to begin exploring news.", fyne.TextAlignCenter, fyne.TextStyle{Italic: true}))
 
@@ -427,8 +520,10 @@ func main() {
 	loadMoreBtn.Hide() 
 	loadMoreContainer := container.NewCenter(loadMoreBtn)
 
+	var refreshResultsUI func() // Declare for mutual recursion with showBookmarksView if needed
+	var showBookmarksView func() // Declare for mutual recursion
 
-	refreshResultsUI := func() {
+	refreshResultsUI = func() {
 		results.Objects = nil 
 
 		if len(allArticles) == 0 {
@@ -442,7 +537,7 @@ func main() {
 		}
 
 		for i := range allArticles {
-			article := allArticles[i] // Important: capture range variable for closures
+			article := allArticles[i] 
 
 			parsedURL, err := url.Parse(article.URL)
 			if err != nil {
@@ -466,71 +561,72 @@ func main() {
 			descriptionLabel := widget.NewLabel(cardDescription)
 			descriptionLabel.Wrapping = fyne.TextWrapWord
 			
-			// Create an image widget for the card
-			imgWidget := canvas.NewImageFromResource(nil) // Start with no resource (blank)
+			imgWidget := canvas.NewImageFromResource(nil) 
 			imgWidget.FillMode = canvas.ImageFillContain
-			imgWidget.SetMinSize(fyne.NewSize(120, 80)) // Set a min size for the image area
+			imgWidget.SetMinSize(fyne.NewSize(120, 80)) 
 
-			// Asynchronously load the image if URLToImage is available
 			if article.URLToImage != "" {
-				go func(imgURL string, targetImg *canvas.Image) {
-					// Ensure http client has a timeout
-					client := http.Client{
-						Timeout: 15 * time.Second,
-					}
+				go func(imgURL string, targetImg *canvas.Image, appRef fyne.App) { // Pass appRef
+					client := http.Client{ Timeout: 15 * time.Second }
 					resp, err := client.Get(imgURL)
-					if err != nil {
-						fmt.Printf("Error fetching image %s: %v\n", imgURL, err)
-						return
-					}
+					if err != nil { fmt.Printf("Error fetching image %s: %v\n", imgURL, err); return }
 					defer resp.Body.Close()
-
-					if resp.StatusCode != http.StatusOK {
-						fmt.Printf("Error fetching image %s: status %s\n", imgURL, resp.Status)
-						return
-					}
-
+					if resp.StatusCode != http.StatusOK { fmt.Printf("Error fetching image %s: status %s\n", imgURL, resp.Status); return }
 					imgData, err := io.ReadAll(resp.Body)
-					if err != nil {
-						fmt.Printf("Error reading image data %s: %v\n", imgURL, err)
-						return
-					}
-
-					// Decode image to ensure it's valid and to potentially use fyne.ImageResource
+					if err != nil { fmt.Printf("Error reading image data %s: %v\n", imgURL, err); return }
 					_, _, err = image.Decode(bytes.NewReader(imgData))
-					if err != nil {
-						fmt.Printf("Error decoding image %s: %v\n", imgURL, err)
-						return
-					}
-					
-					// Create a Fyne resource from the image data
-					// Using the URL as the resource name (should be unique enough for this context)
+					if err != nil { fmt.Printf("Error decoding image %s: %v\n", imgURL, err); return }
 					imgRes := fyne.NewStaticResource(filepath.Base(imgURL), imgData)
-
-					// Update the UI on the main thread
-					// *** THIS IS THE CRITICAL POINT - ATTEMPTING myApp.RunOnMain ***
-					// If this still fails, the Fyne environment/version is the primary suspect.
-					myApp.RunOnMain(func() {
+					
+					// Attempt to use appRef.RunOnMain if available, otherwise, this might not update UI correctly from goroutine
+					// This check is a workaround for environments where RunOnMain might be problematic.
+					// In a standard Fyne v2 setup, appRef.RunOnMain should work.
+					if appRef != nil {
+						appRef.RunOnMain(func() {
+							targetImg.Resource = imgRes
+							targetImg.Refresh()
+						})
+					} else { // Fallback: synchronous refresh (might cause stutter if many images)
 						targetImg.Resource = imgRes
 						targetImg.Refresh()
-					})
+						fmt.Println("Warning: Fyne app instance was nil, image UI update might not be on main thread.")
+					}
 
-				}(article.URLToImage, imgWidget)
+
+				}(article.URLToImage, imgWidget, myApp) // Pass myApp
+			}
+
+			bookmarkBtn := widget.NewButtonWithIcon("", nil, nil)
+			updateBookmarkButton := func(btn *widget.Button, articleURL string) {
+				if isBookmarked(articleURL) {
+					btn.SetIcon(theme.ConfirmIcon()) // Icon for "bookmarked"
+					btn.SetText("Bookmarked")
+				} else {
+					btn.SetIcon(theme.BookmarkIcon()) // Icon for "not bookmarked"
+					btn.SetText("Bookmark")
+				}
+				btn.Refresh()
+			}
+			updateBookmarkButton(bookmarkBtn, article.URL) // Initial state
+
+			// Capture article for the OnTapped closure
+			currentArticleForBookmark := article
+			bookmarkBtn.OnTapped = func() {
+				toggleBookmark(currentArticleForBookmark)
+				updateBookmarkButton(bookmarkBtn, currentArticleForBookmark.URL)
+				// If bookmarks view is open, it should also refresh.
+				// This requires a more complex state management or callback system.
+				// For now, the main list button updates.
 			}
 
 
 			detailsBtn := widget.NewButtonWithIcon("Details", theme.InfoIcon(), func() {
-				// Use the 'article' captured from the loop for this specific button's closure
 				currentArticleForDetail := article 
-
 				fullSummary := summarizeText(currentArticleForDetail.Description)
 				if strings.TrimSpace(currentArticleForDetail.Description) == "" {
 					fullSummary = "Full description is not available."
 				}
-				
 				currentArticleParsedURL, _ := url.Parse(currentArticleForDetail.URL)
-
-
 				content := container.NewVBox(
 					widget.NewLabelWithStyle(currentArticleForDetail.Title, fyne.TextAlignLeading, fyne.TextStyle{Bold: true}),
 					widget.NewSeparator(),
@@ -542,33 +638,17 @@ func main() {
 					widget.NewSeparator(),
 					widget.NewHyperlink("Open Original Article", currentArticleParsedURL),
 				)
-				
 				for _, obj := range content.Objects {
-					if lbl, ok := obj.(*widget.Label); ok {
-						lbl.Wrapping = fyne.TextWrapWord
-					}
+					if lbl, ok := obj.(*widget.Label); ok { lbl.Wrapping = fyne.TextWrapWord }
 				}
-				
 				var detailPopUp *widget.PopUp 
-				
 				closeButton := widget.NewButtonWithIcon("Close", theme.CancelIcon(), func() { detailPopUp.Hide() }) 
-				
-				dialogContainer := container.NewBorder(
-						nil, 
-						container.NewCenter(closeButton), 
-						nil, 
-						nil, 
-						container.NewVScroll(content), 
-					)
-
+				dialogContainer := container.NewBorder(nil, container.NewCenter(closeButton), nil, nil, container.NewVScroll(content))
 				detailPopUp = widget.NewModalPopUp(dialogContainer, myWindow.Canvas())
-				
 				detailPopUp.Resize(fyne.NewSize(myWindow.Canvas().Size().Width*0.8, myWindow.Canvas().Size().Height*0.7))
 				detailPopUp.Show()
 			})
 
-			// Card content now includes the image widget
-			// Using a HBox to place image on left and text content on right
 			textContent := container.NewVBox(
 				descriptionLabel,
 				widget.NewSeparator(),
@@ -579,21 +659,17 @@ func main() {
 				widget.NewSeparator(),
 				container.NewHBox(
 					widget.NewHyperlink("Read Full Article", parsedURL), 
-					layout.NewSpacer(), 
+					layout.NewSpacer(),
+					bookmarkBtn, // Add bookmark button here
 					detailsBtn,
 				),
 			)
-			
 			cardContentWithImage := container.NewBorder(nil, nil, imgWidget, nil, textContent)
-
-
 			card := widget.NewCard(
 				article.Title,
 				fmt.Sprintf("Published: %s", humanTime(article.PublishedAt)),
-				cardContentWithImage, // Use the container that includes the image
+				cardContentWithImage, 
 			)
-			// card.SetImage(imgWidget) // Alternative: if card supports image directly and layout is preferred
-
 			results.Add(card)
 		}
 		results.Refresh()
@@ -601,6 +677,65 @@ func main() {
 			scroll.ScrollToTop()
 		}
 	}
+
+	showBookmarksView = func() {
+		bmWin := myApp.NewWindow("Bookmarked Articles")
+		bmWin.Resize(fyne.NewSize(700, 600))
+		
+		listContent := container.NewVBox()
+		scrollableList := container.NewVScroll(listContent)
+
+		var refreshBookmarksList func()
+		refreshBookmarksList = func() {
+			listContent.Objects = nil // Clear previous items
+			bookmarksMutex.Lock()      // Lock for reading bookmarkedArticles
+			currentBookmarks := make([]Article, len(bookmarkedArticles))
+			copy(currentBookmarks, bookmarkedArticles)
+			bookmarksMutex.Unlock()    // Unlock after copying
+
+			if len(currentBookmarks) == 0 {
+				listContent.Add(widget.NewLabelWithStyle("No articles bookmarked yet.", fyne.TextAlignCenter, fyne.TextStyle{Italic: true}))
+			} else {
+				for _, bmArticle := range currentBookmarks {
+					// Capture bmArticle for the closure
+					articleForView := bmArticle
+
+					titleLabel := widget.NewLabelWithStyle(articleForView.Title, fyne.TextAlignLeading, fyne.TextStyle{Bold: true})
+					descLabel := widget.NewLabel(summarizeText(articleForView.Description))
+					descLabel.Wrapping = fyne.TextWrapWord
+					urlLink, _ := url.Parse(articleForView.URL)
+
+					removeBtn := widget.NewButtonWithIcon("Remove", theme.DeleteIcon(), func() {
+						// Confirm removal
+						dialog.ShowConfirm("Remove Bookmark", fmt.Sprintf("Are you sure you want to remove '%s'?", articleForView.Title), func(confirm bool) {
+							if confirm {
+								toggleBookmark(articleForView) // This saves automatically
+								refreshBookmarksList()         // Refresh this bookmarks view
+								refreshResultsUI()             // Refresh main view to update bookmark buttons
+							}
+						}, bmWin)
+					})
+
+					articleEntry := container.NewVBox(
+						titleLabel,
+						widget.NewLabel(fmt.Sprintf("Published: %s", humanTime(articleForView.PublishedAt))),
+						descLabel,
+						container.NewHBox(widget.NewHyperlink("Open Article", urlLink), layout.NewSpacer(), removeBtn),
+						widget.NewSeparator(),
+					)
+					listContent.Add(articleEntry)
+				}
+			}
+			listContent.Refresh()
+			scrollableList.Refresh() // Refresh scroll container too
+		}
+
+		refreshBookmarksList() // Initial population
+
+		bmWin.SetContent(scrollableList)
+		bmWin.Show()
+	}
+
 
 	sortBtn := widget.NewButtonWithIcon("Sort: Newest First", theme.MenuDropDownIcon(), nil) 
 	sortBtn.OnTapped = func() {
@@ -622,17 +757,11 @@ func main() {
 
 		if key == "" {
 			results.Objects = []fyne.CanvasObject{widget.NewLabelWithStyle("⚠️ API key is required. Please enter it above.", fyne.TextAlignCenter, fyne.TextStyle{Bold: true})}
-			results.Refresh()
-			loadMoreBtn.Hide()
-			loadingIndicator.Hide()
-			return
+			results.Refresh(); loadMoreBtn.Hide(); loadingIndicator.Hide(); return
 		}
 		if query == "" {
 			results.Objects = []fyne.CanvasObject{widget.NewLabelWithStyle("⚠️ Please enter a search query.", fyne.TextAlignCenter, fyne.TextStyle{Bold: true})}
-			results.Refresh()
-			loadMoreBtn.Hide()
-			loadingIndicator.Hide()
-			return
+			results.Refresh(); loadMoreBtn.Hide(); loadingIndicator.Hide(); return
 		}
 
 		results.Objects = nil 
@@ -644,7 +773,6 @@ func main() {
 		currentPage = 1
 		lastQuery = query
 		
-		// Perform fetch synchronously
 		fetchedArticles, total, err := fetchNews(key, query, currentPage)
 		
 		loadingIndicator.Hide()
@@ -652,17 +780,11 @@ func main() {
 
 		if err != nil {
 			results.Add(widget.NewLabelWithStyle(fmt.Sprintf("❌ Error fetching news: %v", err), fyne.TextAlignCenter, fyne.TextStyle{Bold: true, Italic: true}))
-			results.Refresh()
-			loadMoreBtn.Hide()
-			allArticles = nil 
-			return
+			results.Refresh(); loadMoreBtn.Hide(); allArticles = nil; return
 		}
 		if len(fetchedArticles) == 0 {
 			results.Add(widget.NewLabelWithStyle("🔍 No results found for your query: '"+query+"'. Try different keywords.", fyne.TextAlignCenter, fyne.TextStyle{Italic: true}))
-			results.Refresh()
-			loadMoreBtn.Hide()
-			allArticles = nil 
-			return
+			results.Refresh(); loadMoreBtn.Hide(); allArticles = nil; return
 		}
 
 		totalResults = total
@@ -686,22 +808,18 @@ func main() {
 
 	searchRow := container.NewBorder(nil, nil, nil, container.NewHBox(searchBtn, sortBtn), queryInput)
 
-
 	askAIInput := widget.NewEntry()
 	askAIInput.SetPlaceHolder("Ask a question about loaded articles...")
 	
 	showAIResponseDialog := func(title, content string) {
-		
 		contentLabel := widget.NewLabel(content)
 		contentLabel.Wrapping = fyne.TextWrapWord
-
 		dialogVBox := container.NewVBox(
 			widget.NewLabelWithStyle(title, fyne.TextAlignCenter, fyne.TextStyle{Bold: true}),
 			widget.NewSeparator(),
 			container.NewVScroll(contentLabel), 
 			widget.NewSeparator(),
 		)
-		
 		var modal *widget.PopUp
 		closeDialogBtn := widget.NewButtonWithIcon("Close", theme.CancelIcon(), func() { modal.Hide() })
 		modal = widget.NewModalPopUp(
@@ -714,14 +832,8 @@ func main() {
 
 	askBtn := widget.NewButtonWithIcon("Ask AI", theme.QuestionIcon(), func() {
 		question := askAIInput.Text
-		if question == "" {
-			showAIResponseDialog("Ask AI Error", "Please enter a question to ask the AI.")
-			return
-		}
-		if len(allArticles) == 0 { 
-			showAIResponseDialog("Ask AI Info", "No articles loaded. Please perform a search first.")
-			return
-		}
+		if question == "" { showAIResponseDialog("Ask AI Error", "Please enter a question to ask the AI."); return }
+		if len(allArticles) == 0 { showAIResponseDialog("Ask AI Info", "No articles loaded. Please perform a search first."); return }
 		answer := askAI(question, allArticles) 
 		showAIResponseDialog("AI Response", answer)
 	})
@@ -731,12 +843,8 @@ func main() {
 	
 	askAIRow := container.NewBorder(nil, nil, nil, askBtn, askAIInput) 
 
-
 	exportBtn := widget.NewButtonWithIcon("Export MD", theme.FileTextIcon(), func() {
-		if len(allArticles) == 0 {
-			myApp.SendNotification(&fyne.Notification{Title: "Export Info", Content: "No articles to export."})
-			return
-		}
+		if len(allArticles) == 0 { myApp.SendNotification(&fyne.Notification{Title: "Export Info", Content: "No articles to export."}); return }
 		var sb strings.Builder
 		sb.WriteString(fmt.Sprintf("# News Articles for Query: %s\n\n", lastQuery))
 		for _, a := range allArticles {
@@ -750,19 +858,11 @@ func main() {
 			sb.WriteString("\n---\n\n")
 		}
 		home, errHome := os.UserHomeDir()
-		if errHome != nil {
-			showAIResponseDialog("Export Error", "Could not determine user home directory.")
-			return
-		}
-		
+		if errHome != nil { showAIResponseDialog("Export Error", "Could not determine user home directory."); return }
 		docDir := filepath.Join(home, "Documents")
 		if _, err := os.Stat(docDir); os.IsNotExist(err) {
-			if errMkdir := os.MkdirAll(docDir, 0755); errMkdir != nil {
-				showAIResponseDialog("Export Error", fmt.Sprintf("Could not create Documents directory: %v", errMkdir))
-				return
-			}
+			if errMkdir := os.MkdirAll(docDir, 0755); errMkdir != nil { showAIResponseDialog("Export Error", fmt.Sprintf("Could not create Documents directory: %v", errMkdir)); return }
 		}
-
 		dateStr := time.Now().Format("2006-01-02")
 		safeQuery := strings.ReplaceAll(strings.ToLower(lastQuery), " ", "_")
 		safeQuery = strings.ReplaceAll(safeQuery, "/", "_") 
@@ -770,19 +870,12 @@ func main() {
 		if len(safeQuery) > 30 { safeQuery = safeQuery[:30] } 
 		fileName := fmt.Sprintf("news_export_%s_%s.md", safeQuery, dateStr)
 		path := filepath.Join(docDir, fileName) 
-
-		if err := os.WriteFile(path, []byte(sb.String()), 0644); err != nil {
-			showAIResponseDialog("Export Error", fmt.Sprintf("Failed to write file to %s: %v", path, err))
-			return
-		}
+		if err := os.WriteFile(path, []byte(sb.String()), 0644); err != nil { showAIResponseDialog("Export Error", fmt.Sprintf("Failed to write file to %s: %v", path, err)); return }
 		myApp.SendNotification(&fyne.Notification{Title: "Export Success", Content: fmt.Sprintf("Articles exported to %s", path)})
 	})
 
 	clipboardBtn := widget.NewButtonWithIcon("Copy All", theme.ContentCopyIcon(), func() {
-		if len(allArticles) == 0 {
-			myApp.SendNotification(&fyne.Notification{Title: "Clipboard Info", Content: "No articles to copy."})
-			return
-		}
+		if len(allArticles) == 0 { myApp.SendNotification(&fyne.Notification{Title: "Clipboard Info", Content: "No articles to copy."}); return }
 		var sb strings.Builder
 		sb.WriteString(fmt.Sprintf("News Query: %s\n\n", lastQuery))
 		for i, a := range allArticles {
@@ -796,35 +889,30 @@ func main() {
 		myApp.SendNotification(&fyne.Notification{Title: "Clipboard Success", Content: fmt.Sprintf("%d article summaries copied.", len(allArticles))})
 	})
 	
-	utilityRow := container.NewHBox(layout.NewSpacer(), exportBtn, clipboardBtn, layout.NewSpacer()) 
+	// New Bookmarks Button
+	bookmarksBtn := widget.NewButtonWithIcon("Bookmarks", theme.FolderOpenIcon(), func() {
+		showBookmarksView()
+	})
+
+	utilityRow := container.NewHBox(layout.NewSpacer(), bookmarksBtn, exportBtn, clipboardBtn, layout.NewSpacer()) 
 
 	loadMoreBtn.OnTapped = func() {
 		currentPage++
 		key := keyInput.Text
 		query := lastQuery 
-
 		originalBtnText := loadMoreBtn.Text
 		loadMoreBtn.SetText("Loading More...")
 		loadMoreBtn.Disable()
-
-		// Perform fetch synchronously
 		fetchedArticles, _, err := fetchNews(key, query, currentPage)
-		
 		loadMoreBtn.SetText(originalBtnText)
 		loadMoreBtn.Enable()
-
-		if err != nil {
-			myApp.SendNotification(&fyne.Notification{Title: "Load More Error", Content: err.Error()})
-			currentPage-- 
-			return
-		}
+		if err != nil { myApp.SendNotification(&fyne.Notification{Title: "Load More Error", Content: err.Error()}); currentPage--; return }
 		if len(fetchedArticles) > 0 { 
 			allArticles = append(allArticles, fetchedArticles...) 
 			sortByTime(allArticles, sortAsc) 
 			refreshResultsUI()
 			scroll.ScrollToBottom() 
 		}
-
 		if len(allArticles) >= totalResults || len(fetchedArticles) == 0 { 
 			loadMoreBtn.Hide() 
 		} else {
