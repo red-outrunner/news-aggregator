@@ -36,7 +36,6 @@ type Article struct {
 	PublishedAt       string `json:"publishedAt"`
 	ImpactScore       int    `json:"impactScore,omitempty"`
 	PolicyProbability int    `json:"policyProbability,omitempty"`
-	// IsBookmarked bool // Not strictly needed in struct if we check against a separate list by URL
 }
 
 // NewsResponse struct remains the same
@@ -50,6 +49,8 @@ var (
 	bookmarkedArticles []Article
 	bookmarksMutex     sync.Mutex // To protect concurrent access to bookmarkedArticles
 	bookmarksFilePath  string
+	readArticles       map[string]bool // For read/unread status (session only)
+	readArticlesMutex  sync.Mutex      // To protect readArticles map
 )
 
 const bookmarksFilename = "news_aggregator_bookmarks.json"
@@ -87,10 +88,38 @@ func humanTime(tStr string) string {
 	}
 }
 
-// fetchNews function remains the same (URLToImage will be unmarshalled automatically)
-func fetchNews(apiKey, query string, page int) ([]Article, int, error) {
-	apiURL := fmt.Sprintf("https://newsapi.org/v2/everything?q=%s&sortBy=publishedAt&language=en&pageSize=18&page=%d&apiKey=%s", url.QueryEscape(query), page, apiKey)
-	resp, err := http.Get(apiURL)
+// fetchNews function updated to include date range
+func fetchNews(apiKey, query, fromDate, toDate string, page int) ([]Article, int, error) {
+	// Base URL construction
+	baseApiURL := "https://newsapi.org/v2/everything"
+	queryParams := url.Values{}
+	queryParams.Add("q", query)
+	queryParams.Add("sortBy", "publishedAt")
+	queryParams.Add("language", "en")
+	queryParams.Add("pageSize", "18")
+	queryParams.Add("page", fmt.Sprintf("%d", page))
+	queryParams.Add("apiKey", apiKey)
+
+	// Add date parameters if provided and valid
+	if fromDate != "" {
+		if _, err := time.Parse("2006-01-02", fromDate); err == nil {
+			queryParams.Add("from", fromDate)
+		} else {
+			fmt.Printf("Warning: Invalid 'from' date format: %s. Ignoring.\n", fromDate)
+		}
+	}
+	if toDate != "" {
+		if _, err := time.Parse("2006-01-02", toDate); err == nil {
+			queryParams.Add("to", toDate)
+		} else {
+			fmt.Printf("Warning: Invalid 'to' date format: %s. Ignoring.\n", toDate)
+		}
+	}
+
+	fullApiURL := fmt.Sprintf("%s?%s", baseApiURL, queryParams.Encode())
+	fmt.Println("Fetching URL:", fullApiURL) // For debugging
+
+	resp, err := http.Get(fullApiURL)
 	if err != nil {
 		return nil, 0, fmt.Errorf("failed to connect to news service: %w", err)
 	}
@@ -205,7 +234,6 @@ func setupBookmarksPath() {
 	home, err := os.UserHomeDir()
 	if err != nil {
 		fmt.Println("Error getting user home dir for bookmarks:", err)
-		// Fallback to current directory if home cannot be determined
 		bookmarksFilePath = bookmarksFilename
 		return
 	}
@@ -221,11 +249,10 @@ func setupBookmarksPath() {
 func loadBookmarks() {
 	bookmarksMutex.Lock()
 	defer bookmarksMutex.Unlock()
-
 	data, err := os.ReadFile(bookmarksFilePath)
 	if err != nil {
 		if os.IsNotExist(err) {
-			bookmarkedArticles = []Article{} // Initialize if file doesn't exist
+			bookmarkedArticles = []Article{}
 			return
 		}
 		fmt.Println("Error reading bookmarks file:", err)
@@ -241,7 +268,6 @@ func loadBookmarks() {
 func saveBookmarks() {
 	bookmarksMutex.Lock()
 	defer bookmarksMutex.Unlock()
-
 	data, err := json.MarshalIndent(bookmarkedArticles, "", "  ")
 	if err != nil {
 		fmt.Println("Error marshalling bookmarks:", err)
@@ -265,25 +291,18 @@ func isBookmarked(articleURL string) bool {
 
 func toggleBookmark(article Article) {
 	bookmarksMutex.Lock()
-	// Unlock before calling saveBookmarks, then re-lock for the defer
-	// This is to avoid deadlock as saveBookmarks also locks.
-	// A more robust solution might involve passing the lock or using channels.
-	
 	found := false
 	var updatedBookmarks []Article
 	for _, bm := range bookmarkedArticles {
 		if bm.URL == article.URL {
 			found = true
-			// Skip adding it to updatedBookmarks to remove it
 		} else {
 			updatedBookmarks = append(updatedBookmarks, bm)
 		}
 	}
-
 	if !found {
-		// Add the article if it wasn't found (i.e., it's a new bookmark)
 		isAlreadyThere := false
-		for _, ub := range updatedBookmarks { 
+		for _, ub := range updatedBookmarks {
 			if ub.URL == article.URL {
 				isAlreadyThere = true
 				break
@@ -294,12 +313,28 @@ func toggleBookmark(article Article) {
 		}
 	}
 	bookmarkedArticles = updatedBookmarks
-	bookmarksMutex.Unlock() // Unlock before save
-	saveBookmarks() 
-	// No need to re-lock here if the function is ending.
-	// If more operations followed that needed the lock, then re-locking would be necessary.
+	bookmarksMutex.Unlock() 
+	saveBookmarks()
 }
 
+// --- Read/Unread Functions ---
+func markAsRead(articleURL string) {
+	readArticlesMutex.Lock()
+	defer readArticlesMutex.Unlock()
+	if readArticles == nil { // Initialize map if it's nil
+		readArticles = make(map[string]bool)
+	}
+	readArticles[articleURL] = true
+}
+
+func isRead(articleURL string) bool {
+	readArticlesMutex.Lock()
+	defer readArticlesMutex.Unlock()
+	if readArticles == nil {
+		return false
+	}
+	return readArticles[articleURL] // Returns false if key doesn't exist
+}
 
 // summarizeText function remains the same
 func summarizeText(text string) string {
@@ -449,12 +484,13 @@ func askAI(question string, articles []Article) string {
 
 // Main application function
 func main() {
-	myApp := app.NewWithID("com.example.newsaggregator.deluxe.v2") // Updated AppID
+	myApp := app.NewWithID("com.example.newsaggregator.deluxe.v3") // Updated AppID
 	myWindow := myApp.NewWindow("News Aggregator Deluxe")
-	myWindow.Resize(fyne.NewSize(900, 800)) // Slightly larger for new button
+	myWindow.Resize(fyne.NewSize(950, 800)) // Slightly wider for date fields
 
 	setupBookmarksPath()
 	loadBookmarks() // Load bookmarks at startup
+	readArticles = make(map[string]bool) // Initialize read articles map for the session
 
 	// Load theme preference
 	isDarkTheme := loadThemePreference()
@@ -468,8 +504,8 @@ func main() {
 	var currentPage = 1
 	var totalResults = 0
 	var allArticles []Article
-	var lastQuery string
-	sortAsc := false // Default sort: Newest first
+	var lastQuery, lastFromDate, lastToDate string // Store last search parameters
+	sortAsc := false 
 
 	// --- UI Elements ---
 	keyInput := widget.NewPasswordEntry() 
@@ -505,7 +541,19 @@ func main() {
 	apiKeyRow := container.NewBorder(nil, nil, apiKeyLabel, themeBtn, keyInput)
 
 	queryInput := widget.NewEntry()
-	queryInput.SetPlaceHolder("Search news topics (e.g., 'Go programming', 'AI breakthroughs')")
+	queryInput.SetPlaceHolder("Search news topics...")
+
+	// Date range inputs
+	fromDateEntry := widget.NewEntry()
+	fromDateEntry.SetPlaceHolder("From: YYYY-MM-DD")
+	toDateEntry := widget.NewEntry()
+	toDateEntry.SetPlaceHolder("To: YYYY-MM-DD")
+	
+	dateFilterRow := container.NewGridWithColumns(2,
+		container.NewBorder(nil, nil, widget.NewLabel("From:"), nil, fromDateEntry),
+		container.NewBorder(nil, nil, widget.NewLabel("To:"), nil, toDateEntry),
+	)
+
 
 	results := container.NewVBox() 
 	results.Add(widget.NewLabelWithStyle("Enter your API key and a search query to begin exploring news.", fyne.TextAlignCenter, fyne.TextStyle{Italic: true}))
@@ -520,8 +568,8 @@ func main() {
 	loadMoreBtn.Hide() 
 	loadMoreContainer := container.NewCenter(loadMoreBtn)
 
-	var refreshResultsUI func() // Declare for mutual recursion with showBookmarksView if needed
-	var showBookmarksView func() // Declare for mutual recursion
+	var refreshResultsUI func() 
+	var showBookmarksView func() 
 
 	refreshResultsUI = func() {
 		results.Objects = nil 
@@ -566,7 +614,6 @@ func main() {
 			imgWidget.SetMinSize(fyne.NewSize(120, 80)) 
 
 			if article.URLToImage != "" {
-				// Removed appRef parameter from goroutine signature and call
 				go func(imgURL string, targetImg *canvas.Image) { 
 					client := http.Client{ Timeout: 15 * time.Second }
 					resp, err := client.Get(imgURL)
@@ -578,14 +625,8 @@ func main() {
 					_, _, err = image.Decode(bytes.NewReader(imgData))
 					if err != nil { fmt.Printf("Error decoding image %s: %v\n", imgURL, err); return }
 					imgRes := fyne.NewStaticResource(filepath.Base(imgURL), imgData)
-					
-					// Directly update and refresh the image widget from the goroutine
-					// This is a workaround if RunOnMain APIs are consistently failing.
-					// It might not be perfectly thread-safe in all Fyne versions/scenarios
-					// but is the simplest alternative if main thread execution calls are problematic.
 					targetImg.Resource = imgRes
 					targetImg.Refresh()
-
 				}(article.URLToImage, imgWidget) 
 			}
 
@@ -595,7 +636,6 @@ func main() {
 					btn.SetIcon(theme.ConfirmIcon()) 
 					btn.SetText("Bookmarked")
 				} else {
-					// Corrected: Use theme.ContentAddIcon() as a fallback
 					btn.SetIcon(theme.ContentAddIcon()) 
 					btn.SetText("Bookmark")
 				}
@@ -609,9 +649,20 @@ func main() {
 				updateBookmarkButton(bookmarkBtn, currentArticleForBookmark.URL)
 			}
 
+			// Title label with read/unread styling
+			titleLabel := widget.NewLabel(article.Title)
+			if isRead(article.URL) {
+				titleLabel.TextStyle = fyne.TextStyle{Italic: true} // Example: Italic for read
+			} else {
+				titleLabel.TextStyle = fyne.TextStyle{Bold: true} // Default: Bold for unread
+			}
+
 
 			detailsBtn := widget.NewButtonWithIcon("Details", theme.InfoIcon(), func() {
 				currentArticleForDetail := article 
+				markAsRead(currentArticleForDetail.URL) // Mark as read
+				refreshResultsUI() // Refresh main list to show style change
+
 				fullSummary := summarizeText(currentArticleForDetail.Description)
 				if strings.TrimSpace(currentArticleForDetail.Description) == "" {
 					fullSummary = "Full description is not available."
@@ -648,6 +699,8 @@ func main() {
 				),
 				widget.NewSeparator(),
 				container.NewHBox(
+					// For hyperlink, marking as read is harder. For now, only "Details" marks as read.
+					// Could wrap hyperlink in a custom tappable if needed.
 					widget.NewHyperlink("Read Full Article", parsedURL), 
 					layout.NewSpacer(),
 					bookmarkBtn, 
@@ -655,10 +708,12 @@ func main() {
 				),
 			)
 			cardContentWithImage := container.NewBorder(nil, nil, imgWidget, nil, textContent)
+			
+			// Card now uses the styled titleLabel
 			card := widget.NewCard(
-				article.Title,
+				"", // Title is now part of the content for styling
 				fmt.Sprintf("Published: %s", humanTime(article.PublishedAt)),
-				cardContentWithImage, 
+				container.NewVBox(titleLabel, cardContentWithImage),
 			)
 			results.Add(card)
 		}
@@ -742,6 +797,8 @@ func main() {
 	searchBtn := widget.NewButtonWithIcon("Search", theme.SearchIcon(), func() {
 		key := keyInput.Text
 		query := queryInput.Text
+		fromDate := fromDateEntry.Text
+		toDate := toDateEntry.Text
 
 		if key == "" {
 			results.Objects = []fyne.CanvasObject{widget.NewLabelWithStyle("⚠️ API key is required. Please enter it above.", fyne.TextAlignCenter, fyne.TextStyle{Bold: true})}
@@ -760,8 +817,10 @@ func main() {
 		loadMoreBtn.Hide()
 		currentPage = 1
 		lastQuery = query
+		lastFromDate = fromDate // Store for "Load More"
+		lastToDate = toDate     // Store for "Load More"
 		
-		fetchedArticles, total, err := fetchNews(key, query, currentPage)
+		fetchedArticles, total, err := fetchNews(key, query, fromDate, toDate, currentPage)
 		
 		loadingIndicator.Hide()
 		results.Objects = nil 
@@ -793,6 +852,9 @@ func main() {
 	queryInput.OnSubmitted = func(s string) { 
 		searchBtn.OnTapped()
 	}
+	fromDateEntry.OnSubmitted = func(s string) { searchBtn.OnTapped() }
+	toDateEntry.OnSubmitted = func(s string) { searchBtn.OnTapped() }
+
 
 	searchRow := container.NewBorder(nil, nil, nil, container.NewHBox(searchBtn, sortBtn), queryInput)
 
@@ -877,7 +939,6 @@ func main() {
 		myApp.SendNotification(&fyne.Notification{Title: "Clipboard Success", Content: fmt.Sprintf("%d article summaries copied.", len(allArticles))})
 	})
 	
-	// New Bookmarks Button
 	bookmarksBtn := widget.NewButtonWithIcon("Bookmarks", theme.FolderOpenIcon(), func() {
 		showBookmarksView()
 	})
@@ -887,13 +948,9 @@ func main() {
 	loadMoreBtn.OnTapped = func() {
 		currentPage++
 		key := keyInput.Text
-		query := lastQuery 
-		originalBtnText := loadMoreBtn.Text
-		loadMoreBtn.SetText("Loading More...")
-		loadMoreBtn.Disable()
-		fetchedArticles, _, err := fetchNews(key, query, currentPage)
-		loadMoreBtn.SetText(originalBtnText)
-		loadMoreBtn.Enable()
+		// Use last used dates for loading more
+		fetchedArticles, _, err := fetchNews(key, lastQuery, lastFromDate, lastToDate, currentPage)
+		
 		if err != nil { myApp.SendNotification(&fyne.Notification{Title: "Load More Error", Content: err.Error()}); currentPage--; return }
 		if len(fetchedArticles) > 0 { 
 			allArticles = append(allArticles, fetchedArticles...) 
@@ -911,6 +968,7 @@ func main() {
 	topControls := container.NewVBox(
 		apiKeyRow,
 		searchRow, 
+		dateFilterRow, // Add date filter row to layout
 		askAIRow,  
 		utilityRow,
 		widget.NewSeparator(), 
