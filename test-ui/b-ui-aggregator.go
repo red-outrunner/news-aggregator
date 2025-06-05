@@ -228,7 +228,6 @@ func askAI(question string, articles []Article) string {
 	return "Based on the articles, here's some information related to '" + question + "':\n\n" + strings.Join(relevantArticlesOutput, "\n\n")
 }
 
-
 // --- Core Logic (Fetch, Sentiment, etc.) ---
 func calculateSentimentScore(text string) int {
 	score := 0
@@ -533,7 +532,7 @@ func main() {
 	queryInput := widget.NewEntry()
 	queryInput.SetPlaceHolder("Search news topics...")
 	fromDateEntry := widget.NewEntry()
-	fromDateEntry.SetPlaceHolder("From: YYYY-MM-DD")
+	fromDateEntry.SetPlaceHolder("From: YYYY-MM-DD") // Completed placeholder
 	toDateEntry := widget.NewEntry()
 	toDateEntry.SetPlaceHolder("To: YYYY-MM-DD")
 	dateFilterRow := container.NewGridWithColumns(2, container.NewBorder(nil, nil, widget.NewLabel("From:"), nil, fromDateEntry), container.NewBorder(nil, nil, widget.NewLabel("To:"), nil, toDateEntry))
@@ -624,15 +623,19 @@ func main() {
 			} else {
 				currentTitleStyle.Bold = true
 			}
+			
 			// Apply base style to all segments, highlighting will override where needed by RichTextStyleStrong
 			for j := range titleRichText.Segments {
 				if ts, ok := titleRichText.Segments[j].(*widget.TextSegment); ok {
-					// Preserve highlight style (Strong) if it's already set
-					if ts.Style.TextStyle.Bold || ts.Style.TextStyle.Italic || ts.Style.FontPath != "" || ts.Style.Symbol {
-						// This segment is already styled (e.g. highlighted), apply read/unread italic on top
+					// Check if the segment is already styled (e.g., by RichTextStyleStrong for highlighting)
+					// A segment is styled if its Style field is not the zero value for RichTextStyle.
+					// For simplicity, check if TextStyle.Bold is already true (from Strong)
+					isHighlighted := ts.Style.TextStyle.Bold // Strong sets Bold
+
+					if isHighlighted {
+						// If highlighted and read, make italic but keep bold (from Strong)
 						if isRead(article.URL) {
 							ts.Style.TextStyle.Italic = true
-							ts.Style.TextStyle.Bold = false // Ensure highlighted read text is not also bold unless Strong implies it
 						}
 					} else { // Not a highlighted segment
 						ts.Style.TextStyle = currentTitleStyle
@@ -852,12 +855,12 @@ func main() {
 		case SortTimeAsc:
 			currentSortMode = SortSentimentDesc
 			sortBtn.SetText("Sort: Sentiment ↓")
-			sortBtn.SetIcon(theme.MenuDropDownIcon()) 
+			sortBtn.SetIcon(theme.MenuDropDownIcon())
 			sortBySentiment(allArticles, false)
 		case SortSentimentDesc:
 			currentSortMode = SortSentimentAsc
 			sortBtn.SetText("Sort: Sentiment ↑")
-			sortBtn.SetIcon(theme.MenuDropUpIcon()) 
+			sortBtn.SetIcon(theme.MenuDropUpIcon())
 			sortBySentiment(allArticles, true)
 		case SortSentimentAsc:
 			currentSortMode = SortTimeDesc
@@ -1015,10 +1018,14 @@ func main() {
 			allArticles = append(allArticles, fetchedArticles...)
 			// Re-apply sort after loading more
 			switch currentSortMode {
-				case SortTimeDesc: sortByTime(allArticles, false)
-				case SortTimeAsc: sortByTime(allArticles, true)
-				case SortSentimentDesc: sortBySentiment(allArticles, false)
-				case SortSentimentAsc: sortBySentiment(allArticles, true)
+			case SortTimeDesc:
+				sortByTime(allArticles, false)
+			case SortTimeAsc:
+				sortByTime(allArticles, true)
+			case SortSentimentDesc:
+				sortBySentiment(allArticles, false)
+			case SortSentimentAsc:
+				sortBySentiment(allArticles, true)
 			}
 			refreshResultsUI()
 			scroll.ScrollToBottom()
