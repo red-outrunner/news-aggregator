@@ -13,8 +13,8 @@ This joint hits the NewsAPI to fetch the latest articles based on whatever you'r
 ## Structure
 Main folder is cli based version - way behind in updates
 `test-ui/` for ui version
-> the `ui-aggregator.go` is for main tested version I recommend that build for stable type
-> the `b-ui-aggregator.go` is for the new feature I am tryin like the workaround ollama
+> - the `ui-aggregator.go` is for main tested version I recommend that build for stable type
+> - the `b-ui-aggregator.go` is for the new feature I am tryin like the workaround ollama
 
 ## Features
 
