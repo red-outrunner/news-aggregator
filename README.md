@@ -10,6 +10,12 @@ Keep it a stack - staying informed is crucial but who's got time to browse 50 di
 
 This joint hits the NewsAPI to fetch the latest articles based on whatever you're curious about. Type in anything - "Tesla", "crypto", "climate change", whatever you're trying to stay up on - and it'll serve up the 18 most recent stories, sorted fresh to old.
 
+## Structure
+Main folder is cli based version - way behind in updates
+`test-ui/` for ui version
+> the `ui-aggregator.go` is for main tested version I recommend that build for stable type
+> the `b-ui-aggregator.go` is for the new feature I am tryin like the workaround ollama
+
 ## Features
 
 - Real-time news fetching from NewsAPI's global sources
