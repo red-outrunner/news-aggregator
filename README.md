@@ -77,3 +77,4 @@ to make it mire fresh and seamless like Thanos glove:
 7. api to web page - dread
 8. build and package it
 9. Ai summary + prompt to figure out narative or sumn like that
+10. A work around using ollama only for ai summary - in discovery & research and testing
