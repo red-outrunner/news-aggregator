@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"image"
+	// "image/color" // Removed as it's not used
 	_ "image/jpeg" // Register JPEG decoder
 	_ "image/png"  // Register PNG decoder
 	"io"
@@ -12,6 +13,7 @@ import (
 	"net/url"
 	"os"
 	"path/filepath"
+	"regexp"
 	"sort"
 	"strings"
 	"sync"
@@ -27,15 +29,20 @@ import (
 	"fyne.io/fyne/v2/widget"
 )
 
-// Article struct updated to include URLToImage
+// Article struct updated to include URLToImage and SentimentScore
 type Article struct {
 	Title             string `json:"title"`
 	Description       string `json:"description"`
 	URL               string `json:"url"`
-	URLToImage        string `json:"urlToImage"` // Added for image thumbnail
+	URLToImage        string `json:"urlToImage"`
 	PublishedAt       string `json:"publishedAt"`
 	ImpactScore       int    `json:"impactScore,omitempty"`
 	PolicyProbability int    `json:"policyProbability,omitempty"`
+	SentimentScore    int    `json:"sentimentScore,omitempty"` // Added for sentiment analysis
+	Source            struct {                               // NewsAPI often nests source info
+		ID   string `json:"id"`
+		Name string `json:"name"`
+	} `json:"source"`
 }
 
 // NewsResponse struct remains the same
@@ -47,15 +54,19 @@ type NewsResponse struct {
 
 var (
 	bookmarkedArticles []Article
-	bookmarksMutex     sync.Mutex // To protect concurrent access to bookmarkedArticles
+	bookmarksMutex     sync.Mutex
 	bookmarksFilePath  string
-	readArticles       map[string]bool // For read/unread status (session only)
-	readArticlesMutex  sync.Mutex      // To protect readArticles map
+	readArticles       map[string]bool
+	readArticlesMutex  sync.Mutex
 )
 
 const bookmarksFilename = "news_aggregator_bookmarks.json"
 
-// sortByTime function remains the same
+// Sentiment keywords (simple lists for demonstration)
+var positiveKeywords = []string{"good", "great", "excellent", "positive", "success", "improve", "benefit", "breakthrough", "advance", "innovative", "efficient", "effective", "happy", "joy", "love", "strong", "grow", "upward", "boom", "achieve", "support", "launch", "optimistic"}
+var negativeKeywords = []string{"bad", "poor", "terrible", "negative", "fail", "crisis", "disaster", "loss", "decline", "risk", "warn", "threat", "problem", "issue", "concern", "down", "slump", "recession", "challenge", "cut", "reduce", "fear", "angry", "sad"}
+
+// --- Utility Functions (Sorting, Time, etc.) ---
 func sortByTime(articles []Article, ascending bool) {
 	sort.Slice(articles, func(i, j int) bool {
 		t1, _ := time.Parse(time.RFC3339, articles[i].PublishedAt)
@@ -67,7 +78,15 @@ func sortByTime(articles []Article, ascending bool) {
 	})
 }
 
-// humanTime function remains the same
+func sortBySentiment(articles []Article, ascending bool) { // ascending true means Low to High
+	sort.Slice(articles, func(i, j int) bool {
+		if ascending {
+			return articles[i].SentimentScore < articles[j].SentimentScore
+		}
+		return articles[i].SentimentScore > articles[j].SentimentScore
+	})
+}
+
 func humanTime(tStr string) string {
 	t, err := time.Parse(time.RFC3339, tStr)
 	if err != nil {
@@ -84,23 +103,173 @@ func humanTime(tStr string) string {
 	case dur < 7*24*time.Hour:
 		return fmt.Sprintf("%dd ago", int(dur.Hours()/24))
 	default:
-		return t.Format("Jan 2, 2006") // Slightly more informative default
+		return t.Format("Jan 2, 2006")
 	}
 }
 
-// fetchNews function updated to include date range
+// summarizeText function (restored)
+// It creates a summary by taking the first few sentences of the text.
+func summarizeText(text string) string {
+	if strings.TrimSpace(text) == "" {
+		return "No content available to summarize."
+	}
+	// Split by common sentence delimiters. Handle cases like "Mr. Jones" correctly.
+	// This regex is a bit more robust for sentence splitting.
+	sentences := strings.FieldsFunc(text, func(r rune) bool {
+		return r == '.' || r == '!' || r == '?'
+	})
+
+	if len(sentences) == 0 {
+		// If no sentences found (e.g. text without punctuation), return a snippet
+		maxLength := 150
+		if len(text) <= maxLength {
+			return text
+		}
+		// Try to break at a space for cleaner truncation
+		if idx := strings.LastIndex(text[:maxLength], " "); idx != -1 {
+			return text[:idx] + "..."
+		}
+		return text[:maxLength] + "..."
+	}
+
+	var summary strings.Builder
+	sentenceCount := 0
+	desiredSentences := 2 // Number of sentences for the summary
+
+	originalTextIndex := 0
+	for _, s := range sentences {
+		trimmedSentence := strings.TrimSpace(s)
+		if trimmedSentence != "" {
+			// Find the sentence in the original text to get the correct punctuation
+			actualSentenceStart := strings.Index(text[originalTextIndex:], trimmedSentence)
+			if actualSentenceStart != -1 {
+				actualSentenceEnd := actualSentenceStart + len(trimmedSentence)
+				summary.WriteString(text[originalTextIndex+actualSentenceStart : originalTextIndex+actualSentenceEnd]) // Write the sentence itself
+
+				// Append the punctuation if it exists
+				if originalTextIndex+actualSentenceEnd < len(text) {
+					punctuation := text[originalTextIndex+actualSentenceEnd]
+					if punctuation == '.' || punctuation == '!' || punctuation == '?' {
+						summary.WriteRune(rune(punctuation))
+					} else {
+						summary.WriteString(".") // Default if no clear punctuation found immediately after
+					}
+				} else {
+					summary.WriteString(".") // Sentence ends at text end
+				}
+				originalTextIndex += actualSentenceEnd + 1 // Move past this sentence and its punctuation
+			} else {
+				// Fallback if sentence not found (should be rare with FieldsFunc)
+				summary.WriteString(trimmedSentence)
+				summary.WriteString(".")
+			}
+
+			summary.WriteString(" ") // Add space between sentences
+			sentenceCount++
+			if sentenceCount >= desiredSentences {
+				break
+			}
+		}
+	}
+
+	result := strings.TrimSpace(summary.String())
+	if result == "" { // Fallback if all sentences were whitespace
+		maxLength := 150
+		if len(text) <= maxLength {
+			return text
+		}
+		if idx := strings.LastIndex(text[:maxLength], " "); idx != -1 {
+			return text[:idx] + "..."
+		}
+		return text[:maxLength] + "..."
+	}
+	return result
+}
+
+// askAI function (restored)
+// This function simulates an AI by searching for keywords in the loaded articles.
+func askAI(question string, articles []Article) string {
+	searchQuery := strings.ToLower(strings.TrimSpace(question))
+	if searchQuery == "" {
+		return "Please ask a specific question."
+	}
+
+	var relevantArticlesOutput []string
+	questionWords := strings.Fields(searchQuery)
+	initialRelevantCount := 0
+
+	for _, a := range articles {
+		content := strings.ToLower(a.Title + " " + a.Description)
+		matchCount := 0
+		for _, qWord := range questionWords {
+			if len(qWord) > 2 && strings.Contains(content, qWord) {
+				matchCount++
+			}
+		}
+		// Consider it relevant if at least one significant word matches, or multiple words.
+		if matchCount > 0 {
+			summary := summarizeText(a.Description) // Now defined
+			if summary == "No content available to summarize." && a.Title != "" {
+				summary = a.Title // Use title if description is empty
+			}
+			relevantArticlesOutput = append(relevantArticlesOutput, fmt.Sprintf("- %s: %s", a.Title, summary))
+			initialRelevantCount++
+		}
+	}
+
+	if len(relevantArticlesOutput) == 0 {
+		return "No relevant information found in the currently loaded articles for your question: '" + question + "'"
+	}
+
+	if initialRelevantCount > 5 {
+		relevantArticlesOutput = relevantArticlesOutput[:5]
+		relevantArticlesOutput = append(relevantArticlesOutput, fmt.Sprintf("\n(And %d more relevant articles found...)", initialRelevantCount-5))
+	}
+
+	return "Based on the articles, here's some information related to '" + question + "':\n\n" + strings.Join(relevantArticlesOutput, "\n\n")
+}
+
+
+// --- Core Logic (Fetch, Sentiment, etc.) ---
+func calculateSentimentScore(text string) int {
+	score := 0
+	textLower := strings.ToLower(text)
+	words := strings.FieldsFunc(textLower, func(r rune) bool {
+		return !strings.ContainsRune("abcdefghijklmnopqrstuvwxyz0123456789", r) // Basic word split
+	})
+
+	for _, word := range words {
+		for _, pk := range positiveKeywords {
+			if word == pk {
+				score += 10
+			}
+		}
+		for _, nk := range negativeKeywords {
+			if word == nk {
+				score -= 10
+			}
+		}
+	}
+	// Clamp score between -100 and 100
+	if score > 100 {
+		score = 100
+	}
+	if score < -100 {
+		score = -100
+	}
+	return score
+}
+
 func fetchNews(apiKey, query, fromDate, toDate string, page int) ([]Article, int, error) {
-	// Base URL construction
 	baseApiURL := "https://newsapi.org/v2/everything"
 	queryParams := url.Values{}
 	queryParams.Add("q", query)
 	queryParams.Add("sortBy", "publishedAt")
 	queryParams.Add("language", "en")
-	queryParams.Add("pageSize", "18")
+	queryParams.Add("pageSize", "18") // Consider making pageSize configurable
 	queryParams.Add("page", fmt.Sprintf("%d", page))
 	queryParams.Add("apiKey", apiKey)
 
-	// Add date parameters if provided and valid
 	if fromDate != "" {
 		if _, err := time.Parse("2006-01-02", fromDate); err == nil {
 			queryParams.Add("from", fromDate)
@@ -117,7 +286,7 @@ func fetchNews(apiKey, query, fromDate, toDate string, page int) ([]Article, int
 	}
 
 	fullApiURL := fmt.Sprintf("%s?%s", baseApiURL, queryParams.Encode())
-	fmt.Println("Fetching URL:", fullApiURL) // For debugging
+	// fmt.Println("Fetching URL:", fullApiURL) // For debugging
 
 	resp, err := http.Get(fullApiURL)
 	if err != nil {
@@ -156,128 +325,80 @@ func fetchNews(apiKey, query, fromDate, toDate string, page int) ([]Article, int
 	for i := range newsResponse.Articles {
 		newsResponse.Articles[i].ImpactScore = calculateImpactScore(newsResponse.Articles[i].Title + " " + newsResponse.Articles[i].Description)
 		newsResponse.Articles[i].PolicyProbability = calculatePolicyProbability(newsResponse.Articles[i].Title + " " + newsResponse.Articles[i].Description)
+		newsResponse.Articles[i].SentimentScore = calculateSentimentScore(newsResponse.Articles[i].Title + " " + newsResponse.Articles[i].Description)
 	}
 
 	return newsResponse.Articles, newsResponse.TotalResults, nil
 }
 
-// loadSavedKey function remains the same
+// --- Config & Persistence (Key, Theme, Bookmarks) ---
 func loadSavedKey() string {
-	home, err := os.UserHomeDir()
-	if err != nil {
-		fmt.Println("Error getting user home dir:", err)
-		return ""
-	}
-	path := filepath.Join(home, ".config", "news_aggregator_apikey.txt") // More specific filename
+	home, _ := os.UserHomeDir()
+	path := filepath.Join(home, ".config", "news_aggregator_apikey.txt")
 	data, err := os.ReadFile(path)
 	if err != nil {
-		if !os.IsNotExist(err) {
-			fmt.Println("Error reading API key:", err)
-		}
 		return ""
 	}
 	return strings.TrimSpace(string(data))
 }
-
-// saveAPIKey function remains the same
 func saveAPIKey(key string) error {
-	home, err := os.UserHomeDir()
-	if err != nil {
-		return fmt.Errorf("error getting user home dir: %w", err)
-	}
+	home, _ := os.UserHomeDir()
 	dir := filepath.Join(home, ".config")
-	if err := os.MkdirAll(dir, 0700); err != nil {
-		return fmt.Errorf("error creating config directory: %w", err)
-	}
-	path := filepath.Join(dir, "news_aggregator_apikey.txt") // More specific filename
+	os.MkdirAll(dir, 0700)
+	path := filepath.Join(dir, "news_aggregator_apikey.txt")
 	return os.WriteFile(path, []byte(key), 0600)
 }
-
-// loadThemePreference function remains the same
 func loadThemePreference() bool {
-	home, err := os.UserHomeDir()
-	if err != nil {
-		fmt.Println("Error getting user home dir for theme:", err)
-		return false // Default to light theme on error
-	}
-	path := filepath.Join(home, ".config", "news_aggregator_theme.txt") // More specific filename
+	home, _ := os.UserHomeDir()
+	path := filepath.Join(home, ".config", "news_aggregator_theme.txt")
 	data, err := os.ReadFile(path)
 	if err != nil {
-		if !os.IsNotExist(err) {
-			fmt.Println("Error reading theme preference:", err)
-		}
-		return false // Default to light theme
+		return false
 	}
 	return strings.TrimSpace(string(data)) == "dark"
 }
-
-// saveThemePreference function remains the same
 func saveThemePreference(isDark bool) error {
-	home, err := os.UserHomeDir()
-	if err != nil {
-		return fmt.Errorf("error getting user home dir for theme: %w", err)
-	}
+	home, _ := os.UserHomeDir()
 	dir := filepath.Join(home, ".config")
-	if err := os.MkdirAll(dir, 0700); err != nil {
-		return fmt.Errorf("error creating config directory for theme: %w", err)
-	}
-	path := filepath.Join(dir, "news_aggregator_theme.txt") // More specific filename
+	os.MkdirAll(dir, 0700)
+	path := filepath.Join(dir, "news_aggregator_theme.txt")
 	theme := "light"
 	if isDark {
 		theme = "dark"
 	}
 	return os.WriteFile(path, []byte(theme), 0600)
 }
-
-// --- Bookmark Functions ---
 func setupBookmarksPath() {
 	home, err := os.UserHomeDir()
 	if err != nil {
-		fmt.Println("Error getting user home dir for bookmarks:", err)
 		bookmarksFilePath = bookmarksFilename
 		return
 	}
-	configDir := filepath.Join(home, ".config", "newsaggregator")
+	configDir := filepath.Join(home, ".config", "newsaggregator_v3") // New config dir to avoid conflicts
 	if err := os.MkdirAll(configDir, 0700); err != nil {
-		fmt.Println("Error creating config directory for bookmarks:", err)
 		bookmarksFilePath = bookmarksFilename
 		return
 	}
 	bookmarksFilePath = filepath.Join(configDir, bookmarksFilename)
 }
-
 func loadBookmarks() {
 	bookmarksMutex.Lock()
 	defer bookmarksMutex.Unlock()
 	data, err := os.ReadFile(bookmarksFilePath)
 	if err != nil {
-		if os.IsNotExist(err) {
-			bookmarkedArticles = []Article{}
-			return
-		}
-		fmt.Println("Error reading bookmarks file:", err)
 		bookmarkedArticles = []Article{}
 		return
 	}
 	if err := json.Unmarshal(data, &bookmarkedArticles); err != nil {
-		fmt.Println("Error unmarshalling bookmarks:", err)
 		bookmarkedArticles = []Article{}
 	}
 }
-
 func saveBookmarks() {
 	bookmarksMutex.Lock()
 	defer bookmarksMutex.Unlock()
-	data, err := json.MarshalIndent(bookmarkedArticles, "", "  ")
-	if err != nil {
-		fmt.Println("Error marshalling bookmarks:", err)
-		return
-	}
-	if err := os.WriteFile(bookmarksFilePath, data, 0600); err != nil {
-		fmt.Println("Error writing bookmarks file:", err)
-	}
+	data, _ := json.MarshalIndent(bookmarkedArticles, "", "  ")
+	os.WriteFile(bookmarksFilePath, data, 0600)
 }
-
 func isBookmarked(articleURL string) bool {
 	bookmarksMutex.Lock()
 	defer bookmarksMutex.Unlock()
@@ -288,7 +409,6 @@ func isBookmarked(articleURL string) bool {
 	}
 	return false
 }
-
 func toggleBookmark(article Article) {
 	bookmarksMutex.Lock()
 	found := false
@@ -301,138 +421,50 @@ func toggleBookmark(article Article) {
 		}
 	}
 	if !found {
-		isAlreadyThere := false
-		for _, ub := range updatedBookmarks {
-			if ub.URL == article.URL {
-				isAlreadyThere = true
-				break
-			}
-		}
-		if !isAlreadyThere {
-			updatedBookmarks = append(updatedBookmarks, article)
-		}
+		updatedBookmarks = append(updatedBookmarks, article)
 	}
 	bookmarkedArticles = updatedBookmarks
-	bookmarksMutex.Unlock() 
+	bookmarksMutex.Unlock()
 	saveBookmarks()
 }
-
-// --- Read/Unread Functions ---
 func markAsRead(articleURL string) {
 	readArticlesMutex.Lock()
 	defer readArticlesMutex.Unlock()
-	if readArticles == nil { // Initialize map if it's nil
+	if readArticles == nil {
 		readArticles = make(map[string]bool)
 	}
 	readArticles[articleURL] = true
 }
-
 func isRead(articleURL string) bool {
 	readArticlesMutex.Lock()
 	defer readArticlesMutex.Unlock()
 	if readArticles == nil {
 		return false
 	}
-	return readArticles[articleURL] // Returns false if key doesn't exist
+	return readArticles[articleURL]
 }
-
-// summarizeText function remains the same
-func summarizeText(text string) string {
-	if strings.TrimSpace(text) == "" {
-		return "No content available to summarize."
-	}
-	sentences := strings.FieldsFunc(text, func(r rune) bool {
-		return r == '.' || r == '!' || r == '?'
-	})
-
-	if len(sentences) == 0 {
-		maxLength := 150
-		if len(text) <= maxLength {
-			return text
-		}
-		if idx := strings.LastIndex(text[:maxLength], " "); idx != -1 {
-			return text[:idx] + "..."
-		}
-		return text[:maxLength] + "..."
-	}
-
-	var summary strings.Builder
-	sentenceCount := 0
-	desiredSentences := 2 
-
-	originalTextIndex := 0
-	for _, s := range sentences {
-		trimmedSentence := strings.TrimSpace(s)
-		if trimmedSentence != "" {
-			actualSentenceStart := strings.Index(text[originalTextIndex:], trimmedSentence)
-			if actualSentenceStart != -1 {
-				actualSentenceEnd := actualSentenceStart + len(trimmedSentence)
-				summary.WriteString(text[originalTextIndex+actualSentenceStart : originalTextIndex+actualSentenceEnd]) 
-				if originalTextIndex+actualSentenceEnd < len(text) {
-					punctuation := text[originalTextIndex+actualSentenceEnd]
-					if punctuation == '.' || punctuation == '!' || punctuation == '?' {
-						summary.WriteRune(rune(punctuation))
-					} else {
-						summary.WriteString(".") 
-					}
-				} else {
-					summary.WriteString(".") 
-				}
-				originalTextIndex += actualSentenceEnd + 1 
-			} else {
-				summary.WriteString(trimmedSentence)
-				summary.WriteString(".")
-			}
-			summary.WriteString(" ") 
-			sentenceCount++
-			if sentenceCount >= desiredSentences {
-				break
-			}
-		}
-	}
-
-	result := strings.TrimSpace(summary.String())
-	if result == "" { 
-		maxLength := 150
-		if len(text) <= maxLength {
-			return text
-		}
-		if idx := strings.LastIndex(text[:maxLength], " "); idx != -1 {
-			return text[:idx] + "..."
-		}
-		return text[:maxLength] + "..."
-	}
-	return result
-}
-
-
-// calculateImpactScore function remains the same
 func calculateImpactScore(text string) int {
 	keywords := []string{"crisis", "breakthrough", "disaster", "economy", "war", "pandemic", "reform", "urgent", "major", "global", "election", "protest", "conflict", "threat"}
 	score := 0
 	textLower := strings.ToLower(text)
 	for _, k := range keywords {
 		if strings.Contains(textLower, k) {
-			score += 7 
+			score += 7
 		}
 	}
-	return min(100, score) 
+	return min(100, score)
 }
-
-// calculatePolicyProbability function remains the same
 func calculatePolicyProbability(text string) int {
 	keywords := []string{"policy", "regulation", "law", "government", "legislation", "bill", "congress", "senate", "parliament", "decree", "treaty", "court", "ruling", "initiative"}
 	score := 0
 	textLower := strings.ToLower(text)
 	for _, k := range keywords {
 		if strings.Contains(textLower, k) {
-			score += 10 
+			score += 10
 		}
 	}
-	return min(100, score) 
+	return min(100, score)
 }
-
-// min function remains the same
 func min(a, b int) int {
 	if a < b {
 		return a
@@ -440,59 +472,16 @@ func min(a, b int) int {
 	return b
 }
 
-// askAI function. Simplified "and more" logic.
-func askAI(question string, articles []Article) string {
-	searchQuery := strings.ToLower(strings.TrimSpace(question))
-	if searchQuery == "" {
-		return "Please ask a specific question."
-	}
-
-	var relevantArticlesOutput []string
-	questionWords := strings.Fields(searchQuery)
-	initialRelevantCount := 0 
-
-	for _, a := range articles {
-		content := strings.ToLower(a.Title + " " + a.Description)
-		matchCount := 0
-		for _, qWord := range questionWords {
-			if len(qWord) > 2 && strings.Contains(content, qWord) {
-				matchCount++
-			}
-		}
-		if matchCount > 0 {
-			summary := summarizeText(a.Description)
-			if summary == "No content available to summarize." && a.Title != "" {
-				summary = a.Title
-			}
-			relevantArticlesOutput = append(relevantArticlesOutput, fmt.Sprintf("- %s: %s", a.Title, summary))
-			initialRelevantCount++
-		}
-	}
-
-	if len(relevantArticlesOutput) == 0 {
-		return "No relevant information found in the currently loaded articles for your question: '" + question + "'"
-	}
-
-	if initialRelevantCount > 5 {
-		relevantArticlesOutput = relevantArticlesOutput[:5] 
-		relevantArticlesOutput = append(relevantArticlesOutput, fmt.Sprintf("\n(And %d more relevant articles found...)", initialRelevantCount-5))
-	}
-
-	return "Based on the articles, here's some information related to '" + question + "':\n\n" + strings.Join(relevantArticlesOutput, "\n\n")
-}
-
-
-// Main application function
+// --- Main Application ---
 func main() {
-	myApp := app.NewWithID("com.example.newsaggregator.deluxe.v3") // Updated AppID
-	myWindow := myApp.NewWindow("News Aggregator Deluxe")
-	myWindow.Resize(fyne.NewSize(950, 800)) // Slightly wider for date fields
+	myApp := app.NewWithID("com.example.newsaggregator.marketresearch.v1")
+	myWindow := myApp.NewWindow("Market Research News Tool")
+	myWindow.Resize(fyne.NewSize(1000, 850))
 
 	setupBookmarksPath()
-	loadBookmarks() // Load bookmarks at startup
-	readArticles = make(map[string]bool) // Initialize read articles map for the session
+	loadBookmarks()
+	readArticles = make(map[string]bool)
 
-	// Load theme preference
 	isDarkTheme := loadThemePreference()
 	if isDarkTheme {
 		myApp.Settings().SetTheme(theme.DarkTheme())
@@ -500,32 +489,36 @@ func main() {
 		myApp.Settings().SetTheme(theme.LightTheme())
 	}
 
-	// --- Data Variables ---
 	var currentPage = 1
 	var totalResults = 0
 	var allArticles []Article
-	var lastQuery, lastFromDate, lastToDate string // Store last search parameters
-	sortAsc := false 
+	var lastQuery, lastFromDate, lastToDate string
 
-	// --- UI Elements ---
-	keyInput := widget.NewPasswordEntry() 
+	type SortMode int
+	const (
+		SortTimeDesc SortMode = iota
+		SortTimeAsc
+		SortSentimentDesc
+		SortSentimentAsc
+	)
+	currentSortMode := SortTimeDesc
+
+	keyInput := widget.NewPasswordEntry()
 	keyInput.SetPlaceHolder("Enter NewsAPI key...")
 	apiKey := loadSavedKey()
 	if apiKey != "" {
 		keyInput.SetText(apiKey)
 	}
-
-	themeBtn := widget.NewButtonWithIcon("", theme.ColorPaletteIcon(), nil) 
+	themeBtn := widget.NewButtonWithIcon("", theme.ColorPaletteIcon(), nil)
 	updateThemeButtonText := func(isDark bool) {
 		if isDark {
-			themeBtn.SetText("Set Light Theme")
+			themeBtn.SetText("Light Theme")
 		} else {
-			themeBtn.SetText("Set Dark Theme")
+			themeBtn.SetText("Dark Theme")
 		}
 		themeBtn.Refresh()
 	}
-	updateThemeButtonText(isDarkTheme) 
-
+	updateThemeButtonText(isDarkTheme)
 	themeBtn.OnTapped = func() {
 		isDarkTheme = !isDarkTheme
 		if isDarkTheme {
@@ -536,189 +529,220 @@ func main() {
 		updateThemeButtonText(isDarkTheme)
 		saveThemePreference(isDarkTheme)
 	}
-	
 	apiKeyLabel := widget.NewLabel("API Key:")
 	apiKeyRow := container.NewBorder(nil, nil, apiKeyLabel, themeBtn, keyInput)
-
 	queryInput := widget.NewEntry()
 	queryInput.SetPlaceHolder("Search news topics...")
-
-	// Date range inputs
 	fromDateEntry := widget.NewEntry()
 	fromDateEntry.SetPlaceHolder("From: YYYY-MM-DD")
 	toDateEntry := widget.NewEntry()
 	toDateEntry.SetPlaceHolder("To: YYYY-MM-DD")
-	
-	dateFilterRow := container.NewGridWithColumns(2,
-		container.NewBorder(nil, nil, widget.NewLabel("From:"), nil, fromDateEntry),
-		container.NewBorder(nil, nil, widget.NewLabel("To:"), nil, toDateEntry),
-	)
-
-
-	results := container.NewVBox() 
-	results.Add(widget.NewLabelWithStyle("Enter your API key and a search query to begin exploring news.", fyne.TextAlignCenter, fyne.TextStyle{Italic: true}))
-
+	dateFilterRow := container.NewGridWithColumns(2, container.NewBorder(nil, nil, widget.NewLabel("From:"), nil, fromDateEntry), container.NewBorder(nil, nil, widget.NewLabel("To:"), nil, toDateEntry))
+	results := container.NewVBox()
+	results.Add(widget.NewLabelWithStyle("Enter API key and search query.", fyne.TextAlignCenter, fyne.TextStyle{Italic: true}))
 	scroll := container.NewVScroll(results)
-	scroll.SetMinSize(fyne.NewSize(300,400)) 
-
+	scroll.SetMinSize(fyne.NewSize(300, 400))
 	loadingIndicator := widget.NewProgressBarInfinite()
-	loadingIndicator.Hide() 
-
+	loadingIndicator.Hide()
 	loadMoreBtn := widget.NewButtonWithIcon("Load More Articles", theme.MoreVerticalIcon(), nil)
-	loadMoreBtn.Hide() 
+	loadMoreBtn.Hide()
 	loadMoreContainer := container.NewCenter(loadMoreBtn)
 
-	var refreshResultsUI func() 
-	var showBookmarksView func() 
+	var refreshResultsUI func()
+	var showBookmarksView func()
+	var showTrendAnalysisDialog func()
+
+	// Helper for RichText highlighting
+	createHighlightedText := func(text, query string) *widget.RichText {
+		richText := widget.NewRichText()
+		if query == "" {
+			richText.Segments = []widget.RichTextSegment{&widget.TextSegment{Text: text}}
+			return richText
+		}
+
+		queryWords := strings.Fields(strings.ToLower(query))
+		var reParts []string
+		for _, qw := range queryWords {
+			if len(qw) > 0 { // Avoid empty strings from multiple spaces
+				reParts = append(reParts, regexp.QuoteMeta(qw))
+			}
+		}
+		if len(reParts) == 0 { // No valid query words
+			richText.Segments = []widget.RichTextSegment{&widget.TextSegment{Text: text}}
+			return richText
+		}
+
+		highlightRegex := regexp.MustCompile(`(?i)\b(` + strings.Join(reParts, "|") + `)\b`)
+
+		matches := highlightRegex.FindAllStringIndex(text, -1)
+		lastIndex := 0
+
+		for _, match := range matches {
+			start, end := match[0], match[1]
+			// Add text before match
+			if start > lastIndex {
+				richText.Segments = append(richText.Segments, &widget.TextSegment{Text: text[lastIndex:start]})
+			}
+			// Add highlighted match
+			highlightStyle := widget.RichTextStyleStrong
+			// highlightStyle.ColorName = theme.ColorNameFocus // Using Strong style instead of color for wider compatibility
+
+			richText.Segments = append(richText.Segments, &widget.TextSegment{Text: text[start:end], Style: highlightStyle})
+			lastIndex = end
+		}
+		// Add text after the last match
+		if lastIndex < len(text) {
+			richText.Segments = append(richText.Segments, &widget.TextSegment{Text: text[lastIndex:]})
+		}
+
+		if len(richText.Segments) == 0 && text != "" { // Handle case where no matches but text exists
+			richText.Segments = []widget.RichTextSegment{&widget.TextSegment{Text: text}}
+		}
+		return richText
+	}
 
 	refreshResultsUI = func() {
-		results.Objects = nil 
-
+		results.Objects = nil
 		if len(allArticles) == 0 {
-			if lastQuery != "" { 
-				results.Add(widget.NewLabelWithStyle("No articles found for your query: '"+lastQuery+"'.", fyne.TextAlignCenter, fyne.TextStyle{Italic: true}))
+			if lastQuery != "" {
+				results.Add(widget.NewLabelWithStyle("No articles for '"+lastQuery+"'.", fyne.TextAlignCenter, fyne.TextStyle{Italic: true}))
 			} else {
-				results.Add(widget.NewLabelWithStyle("Enter your API key and a search query to begin exploring news.", fyne.TextAlignCenter, fyne.TextStyle{Italic: true}))
+				results.Add(widget.NewLabelWithStyle("Enter API key & search.", fyne.TextAlignCenter, fyne.TextStyle{Italic: true}))
 			}
 			results.Refresh()
 			return
 		}
 
 		for i := range allArticles {
-			article := allArticles[i] 
+			article := allArticles[i]
+			parsedURL, _ := url.Parse(article.URL)
 
-			parsedURL, err := url.Parse(article.URL)
-			if err != nil {
-				fmt.Printf("Error parsing URL %s: %v\n", article.URL, err)
-				parsedURL, _ = url.Parse("https://example.com/invalid-url") 
+			// Highlighted Title
+			titleRichText := createHighlightedText(article.Title, lastQuery)
+			var currentTitleStyle fyne.TextStyle
+			if isRead(article.URL) {
+				currentTitleStyle.Italic = true
+			} else {
+				currentTitleStyle.Bold = true
 			}
-
-			cardDescription := article.Description
-			if len(cardDescription) > 180 { 
-				cardDescription = cardDescription[:180]
-				if idx := strings.LastIndex(cardDescription, " "); idx != -1 {
-					cardDescription = cardDescription[:idx] + "..."
-				} else {
-					cardDescription += "..."
+			// Apply base style to all segments, highlighting will override where needed by RichTextStyleStrong
+			for j := range titleRichText.Segments {
+				if ts, ok := titleRichText.Segments[j].(*widget.TextSegment); ok {
+					// Preserve highlight style (Strong) if it's already set
+					if ts.Style.TextStyle.Bold || ts.Style.TextStyle.Italic || ts.Style.FontPath != "" || ts.Style.Symbol {
+						// This segment is already styled (e.g. highlighted), apply read/unread italic on top
+						if isRead(article.URL) {
+							ts.Style.TextStyle.Italic = true
+							ts.Style.TextStyle.Bold = false // Ensure highlighted read text is not also bold unless Strong implies it
+						}
+					} else { // Not a highlighted segment
+						ts.Style.TextStyle = currentTitleStyle
+					}
 				}
 			}
-			if strings.TrimSpace(cardDescription) == "" {
-				cardDescription = "No description available for this article."
-			}
-			
-			descriptionLabel := widget.NewLabel(cardDescription)
-			descriptionLabel.Wrapping = fyne.TextWrapWord
-			
-			imgWidget := canvas.NewImageFromResource(nil) 
-			imgWidget.FillMode = canvas.ImageFillContain
-			imgWidget.SetMinSize(fyne.NewSize(120, 80)) 
+			titleRichText.Refresh()
 
+
+			// Highlighted Description
+			cardDescription := article.Description
+			if len(cardDescription) > 180 {
+				cardDescription = cardDescription[:177] + "..."
+			}
+			if strings.TrimSpace(cardDescription) == "" {
+				cardDescription = "No description."
+			}
+			descriptionRichText := createHighlightedText(cardDescription, lastQuery)
+			descriptionRichText.Wrapping = fyne.TextWrapWord
+
+			imgWidget := canvas.NewImageFromResource(nil)
+			imgWidget.FillMode = canvas.ImageFillContain
+			imgWidget.SetMinSize(fyne.NewSize(120, 80))
 			if article.URLToImage != "" {
-				go func(imgURL string, targetImg *canvas.Image) { 
-					client := http.Client{ Timeout: 15 * time.Second }
+				go func(imgURL string, targetImg *canvas.Image) {
+					client := http.Client{Timeout: 15 * time.Second}
 					resp, err := client.Get(imgURL)
-					if err != nil { fmt.Printf("Error fetching image %s: %v\n", imgURL, err); return }
+					if err != nil {
+						return
+					}
 					defer resp.Body.Close()
-					if resp.StatusCode != http.StatusOK { fmt.Printf("Error fetching image %s: status %s\n", imgURL, resp.Status); return }
+					if resp.StatusCode != http.StatusOK {
+						return
+					}
 					imgData, err := io.ReadAll(resp.Body)
-					if err != nil { fmt.Printf("Error reading image data %s: %v\n", imgURL, err); return }
+					if err != nil {
+						return
+					}
 					_, _, err = image.Decode(bytes.NewReader(imgData))
-					if err != nil { fmt.Printf("Error decoding image %s: %v\n", imgURL, err); return }
+					if err != nil {
+						return
+					}
 					imgRes := fyne.NewStaticResource(filepath.Base(imgURL), imgData)
 					targetImg.Resource = imgRes
 					targetImg.Refresh()
-				}(article.URLToImage, imgWidget) 
+				}(article.URLToImage, imgWidget)
 			}
 
 			bookmarkBtn := widget.NewButtonWithIcon("", nil, nil)
 			updateBookmarkButton := func(btn *widget.Button, articleURL string) {
 				if isBookmarked(articleURL) {
-					btn.SetIcon(theme.ConfirmIcon()) 
+					btn.SetIcon(theme.ConfirmIcon())
 					btn.SetText("Bookmarked")
 				} else {
-					btn.SetIcon(theme.ContentAddIcon()) 
+					btn.SetIcon(theme.ContentAddIcon())
 					btn.SetText("Bookmark")
 				}
 				btn.Refresh()
 			}
-			updateBookmarkButton(bookmarkBtn, article.URL) 
-
+			updateBookmarkButton(bookmarkBtn, article.URL)
 			currentArticleForBookmark := article
 			bookmarkBtn.OnTapped = func() {
 				toggleBookmark(currentArticleForBookmark)
 				updateBookmarkButton(bookmarkBtn, currentArticleForBookmark.URL)
+				// Consider refreshing bookmarks view if open:
+				// if bmWin != nil && bmWin.Content() != nil { refreshBookmarksList() } // Needs bmWin to be accessible
 			}
-
-			// Title label with read/unread styling
-			titleLabel := widget.NewLabel(article.Title)
-			if isRead(article.URL) {
-				titleLabel.TextStyle = fyne.TextStyle{Italic: true} // Example: Italic for read
-			} else {
-				titleLabel.TextStyle = fyne.TextStyle{Bold: true} // Default: Bold for unread
-			}
-
 
 			detailsBtn := widget.NewButtonWithIcon("Details", theme.InfoIcon(), func() {
-				currentArticleForDetail := article 
-				markAsRead(currentArticleForDetail.URL) // Mark as read
-				refreshResultsUI() // Refresh main list to show style change
-
+				currentArticleForDetail := article
+				markAsRead(currentArticleForDetail.URL)
+				refreshResultsUI() // Refresh to show read state
 				fullSummary := summarizeText(currentArticleForDetail.Description)
 				if strings.TrimSpace(currentArticleForDetail.Description) == "" {
-					fullSummary = "Full description is not available."
+					fullSummary = "No full description."
 				}
 				currentArticleParsedURL, _ := url.Parse(currentArticleForDetail.URL)
-				content := container.NewVBox(
-					widget.NewLabelWithStyle(currentArticleForDetail.Title, fyne.TextAlignLeading, fyne.TextStyle{Bold: true}),
-					widget.NewSeparator(),
-					widget.NewLabelWithStyle("Summary:", fyne.TextAlignLeading, fyne.TextStyle{Bold: true}),
-					widget.NewLabel(fullSummary), 
-					widget.NewSeparator(),
-					widget.NewLabel(fmt.Sprintf("Impact Score: %d/100", currentArticleForDetail.ImpactScore)),
-					widget.NewLabel(fmt.Sprintf("Policy Relevance: %d%%", currentArticleForDetail.PolicyProbability)), 
-					widget.NewSeparator(),
-					widget.NewHyperlink("Open Original Article", currentArticleParsedURL),
-				)
+				content := container.NewVBox(widget.NewLabelWithStyle(currentArticleForDetail.Title, fyne.TextAlignLeading, fyne.TextStyle{Bold: true}), widget.NewSeparator(), widget.NewLabelWithStyle("Summary:", fyne.TextAlignLeading, fyne.TextStyle{Bold: true}), widget.NewLabel(fullSummary), widget.NewSeparator(), widget.NewLabel(fmt.Sprintf("Impact: %d", currentArticleForDetail.ImpactScore)), widget.NewLabel(fmt.Sprintf("Policy: %d%%", currentArticleForDetail.PolicyProbability)), widget.NewLabel(fmt.Sprintf("Sentiment: %d", currentArticleForDetail.SentimentScore)), widget.NewSeparator(), widget.NewHyperlink("Open Original", currentArticleParsedURL))
 				for _, obj := range content.Objects {
-					if lbl, ok := obj.(*widget.Label); ok { lbl.Wrapping = fyne.TextWrapWord }
+					if lbl, ok := obj.(*widget.Label); ok {
+						lbl.Wrapping = fyne.TextWrapWord
+					}
 				}
-				var detailPopUp *widget.PopUp 
-				closeButton := widget.NewButtonWithIcon("Close", theme.CancelIcon(), func() { detailPopUp.Hide() }) 
+				var detailPopUp *widget.PopUp
+				closeButton := widget.NewButtonWithIcon("Close", theme.CancelIcon(), func() { detailPopUp.Hide() })
 				dialogContainer := container.NewBorder(nil, container.NewCenter(closeButton), nil, nil, container.NewVScroll(content))
 				detailPopUp = widget.NewModalPopUp(dialogContainer, myWindow.Canvas())
 				detailPopUp.Resize(fyne.NewSize(myWindow.Canvas().Size().Width*0.8, myWindow.Canvas().Size().Height*0.7))
 				detailPopUp.Show()
 			})
 
-			textContent := container.NewVBox(
-				descriptionLabel,
-				widget.NewSeparator(),
-				container.NewGridWithColumns(2,
-					widget.NewLabel(fmt.Sprintf("Impact: %d", article.ImpactScore)),
-					widget.NewLabel(fmt.Sprintf("Policy: %d%%", article.PolicyProbability)),
-				),
-				widget.NewSeparator(),
-				container.NewHBox(
-					// For hyperlink, marking as read is harder. For now, only "Details" marks as read.
-					// Could wrap hyperlink in a custom tappable if needed.
-					widget.NewHyperlink("Read Full Article", parsedURL), 
-					layout.NewSpacer(),
-					bookmarkBtn, 
-					detailsBtn,
-				),
-			)
+			sentimentLabel := widget.NewLabel(fmt.Sprintf("Sentiment: %d", article.SentimentScore))
+			if article.SentimentScore > 20 {
+				sentimentLabel.Importance = widget.SuccessImportance
+			} else if article.SentimentScore < -20 {
+				sentimentLabel.Importance = widget.DangerImportance
+			} else {
+				sentimentLabel.Importance = widget.MediumImportance
+			}
+
+			textContent := container.NewVBox(descriptionRichText, widget.NewSeparator(), container.NewGridWithColumns(3, widget.NewLabel(fmt.Sprintf("Impact: %d", article.ImpactScore)), widget.NewLabel(fmt.Sprintf("Policy: %d%%", article.PolicyProbability)), sentimentLabel), widget.NewSeparator(), container.NewHBox(widget.NewHyperlink("Read Full Article", parsedURL), layout.NewSpacer(), bookmarkBtn, detailsBtn))
 			cardContentWithImage := container.NewBorder(nil, nil, imgWidget, nil, textContent)
-			
-			// Card now uses the styled titleLabel
-			card := widget.NewCard(
-				"", // Title is now part of the content for styling
-				fmt.Sprintf("Published: %s", humanTime(article.PublishedAt)),
-				container.NewVBox(titleLabel, cardContentWithImage),
-			)
+			// Use a VBox for the card content to place titleRichText above other elements
+			cardMainContent := container.NewVBox(titleRichText, cardContentWithImage)
+			card := widget.NewCard("", fmt.Sprintf("Published: %s by %s", humanTime(article.PublishedAt), article.Source.Name), cardMainContent)
 			results.Add(card)
 		}
 		results.Refresh()
-		if !sortAsc && currentPage == 1 { 
+		if currentSortMode == SortTimeDesc && currentPage == 1 {
 			scroll.ScrollToTop()
 		}
 	}
@@ -726,262 +750,288 @@ func main() {
 	showBookmarksView = func() {
 		bmWin := myApp.NewWindow("Bookmarked Articles")
 		bmWin.Resize(fyne.NewSize(700, 600))
-		
 		listContent := container.NewVBox()
 		scrollableList := container.NewVScroll(listContent)
-
 		var refreshBookmarksList func()
 		refreshBookmarksList = func() {
-			listContent.Objects = nil 
-			bookmarksMutex.Lock()      
+			listContent.Objects = nil
+			bookmarksMutex.Lock()
 			currentBookmarks := make([]Article, len(bookmarkedArticles))
 			copy(currentBookmarks, bookmarkedArticles)
-			bookmarksMutex.Unlock()    
-
+			bookmarksMutex.Unlock()
 			if len(currentBookmarks) == 0 {
-				listContent.Add(widget.NewLabelWithStyle("No articles bookmarked yet.", fyne.TextAlignCenter, fyne.TextStyle{Italic: true}))
+				listContent.Add(widget.NewLabelWithStyle("No articles bookmarked.", fyne.TextAlignCenter, fyne.TextStyle{Italic: true}))
 			} else {
 				for _, bmArticle := range currentBookmarks {
 					articleForView := bmArticle
-
 					titleLabel := widget.NewLabelWithStyle(articleForView.Title, fyne.TextAlignLeading, fyne.TextStyle{Bold: true})
-					descLabel := widget.NewLabel(summarizeText(articleForView.Description))
+					descLabel := widget.NewLabel(summarizeText(articleForView.Description)) // Now defined
 					descLabel.Wrapping = fyne.TextWrapWord
 					urlLink, _ := url.Parse(articleForView.URL)
-
 					removeBtn := widget.NewButtonWithIcon("Remove", theme.DeleteIcon(), func() {
-						dialog.ShowConfirm("Remove Bookmark", fmt.Sprintf("Are you sure you want to remove '%s'?", articleForView.Title), func(confirm bool) {
+						dialog.ShowConfirm("Remove Bookmark", fmt.Sprintf("Remove '%s'?", articleForView.Title), func(confirm bool) {
 							if confirm {
-								toggleBookmark(articleForView) 
-								refreshBookmarksList()         
-								refreshResultsUI()             
+								toggleBookmark(articleForView)
+								refreshBookmarksList()
+								refreshResultsUI()
 							}
 						}, bmWin)
 					})
-
-					articleEntry := container.NewVBox(
-						titleLabel,
-						widget.NewLabel(fmt.Sprintf("Published: %s", humanTime(articleForView.PublishedAt))),
-						descLabel,
-						container.NewHBox(widget.NewHyperlink("Open Article", urlLink), layout.NewSpacer(), removeBtn),
-						widget.NewSeparator(),
-					)
-					listContent.Add(articleEntry)
+					listContent.Add(container.NewVBox(titleLabel, widget.NewLabel(fmt.Sprintf("Published: %s", humanTime(articleForView.PublishedAt))), descLabel, container.NewHBox(widget.NewHyperlink("Open", urlLink), layout.NewSpacer(), removeBtn), widget.NewSeparator()))
 				}
 			}
 			listContent.Refresh()
-			scrollableList.Refresh() 
+			scrollableList.Refresh()
 		}
-
-		refreshBookmarksList() 
-
+		refreshBookmarksList()
 		bmWin.SetContent(scrollableList)
 		bmWin.Show()
 	}
 
-
-	sortBtn := widget.NewButtonWithIcon("Sort: Newest First", theme.MenuDropDownIcon(), nil) 
-	sortBtn.OnTapped = func() {
-		sortAsc = !sortAsc
-		if sortAsc {
-			sortBtn.SetText("Sort: Oldest First")
-			sortBtn.SetIcon(theme.MenuDropUpIcon()) 
-		} else {
-			sortBtn.SetText("Sort: Newest First")
-			sortBtn.SetIcon(theme.MenuDropDownIcon()) 
+	showTrendAnalysisDialog = func() {
+		if len(allArticles) == 0 || lastQuery == "" {
+			dialog.ShowInformation("Trend Analysis", "No articles or search query to analyze.", myWindow)
+			return
 		}
-		sortByTime(allArticles, sortAsc)
+
+		trendWin := myApp.NewWindow(fmt.Sprintf("Trend for: %s", lastQuery))
+		trendWin.Resize(fyne.NewSize(400, 500))
+
+		countsByDate := make(map[string]int) // YYYY-MM-DD -> count
+		queryWords := strings.Fields(strings.ToLower(lastQuery))
+
+		for _, article := range allArticles {
+			articleTextLower := strings.ToLower(article.Title + " " + article.Description)
+			foundKeyword := false
+			for _, qw := range queryWords {
+				if strings.Contains(articleTextLower, qw) {
+					foundKeyword = true
+					break
+				}
+			}
+			if foundKeyword {
+				t, err := time.Parse(time.RFC3339, article.PublishedAt)
+				if err == nil {
+					dateStr := t.Format("2006-01-02")
+					countsByDate[dateStr]++
+				}
+			}
+		}
+
+		if len(countsByDate) == 0 {
+			dialog.ShowInformation("Trend Analysis", "No articles matched the query for trend analysis.", myWindow)
+			trendWin.Close() // Close the empty trend window
+			return
+		}
+
+		var dates []string
+		for dateStr := range countsByDate {
+			dates = append(dates, dateStr)
+		}
+		sort.Strings(dates) // Sort chronologically
+
+		tableContent := container.NewVBox()
+		tableContent.Add(container.NewGridWithColumns(2, widget.NewLabelWithStyle("Date", fyne.TextAlignLeading, fyne.TextStyle{Bold: true}), widget.NewLabelWithStyle("Article Count", fyne.TextAlignLeading, fyne.TextStyle{Bold: true})))
+		tableContent.Add(widget.NewSeparator())
+
+		for _, dateStr := range dates {
+			tableContent.Add(container.NewGridWithColumns(2, widget.NewLabel(dateStr), widget.NewLabel(fmt.Sprintf("%d", countsByDate[dateStr]))))
+		}
+
+		trendWin.SetContent(container.NewScroll(tableContent))
+		trendWin.Show()
+	}
+
+	sortBtn := widget.NewButtonWithIcon("Sort: Time ↓", theme.MenuDropDownIcon(), nil)
+	sortBtn.OnTapped = func() {
+		switch currentSortMode {
+		case SortTimeDesc:
+			currentSortMode = SortTimeAsc
+			sortBtn.SetText("Sort: Time ↑")
+			sortBtn.SetIcon(theme.MenuDropUpIcon())
+			sortByTime(allArticles, true)
+		case SortTimeAsc:
+			currentSortMode = SortSentimentDesc
+			sortBtn.SetText("Sort: Sentiment ↓")
+			sortBtn.SetIcon(theme.MenuDropDownIcon()) 
+			sortBySentiment(allArticles, false)
+		case SortSentimentDesc:
+			currentSortMode = SortSentimentAsc
+			sortBtn.SetText("Sort: Sentiment ↑")
+			sortBtn.SetIcon(theme.MenuDropUpIcon()) 
+			sortBySentiment(allArticles, true)
+		case SortSentimentAsc:
+			currentSortMode = SortTimeDesc
+			sortBtn.SetText("Sort: Time ↓")
+			sortBtn.SetIcon(theme.MenuDropDownIcon())
+			sortByTime(allArticles, false)
+		}
 		refreshResultsUI()
 	}
-	
+
 	searchBtn := widget.NewButtonWithIcon("Search", theme.SearchIcon(), func() {
 		key := keyInput.Text
 		query := queryInput.Text
 		fromDate := fromDateEntry.Text
 		toDate := toDateEntry.Text
-
 		if key == "" {
-			results.Objects = []fyne.CanvasObject{widget.NewLabelWithStyle("⚠️ API key is required. Please enter it above.", fyne.TextAlignCenter, fyne.TextStyle{Bold: true})}
-			results.Refresh(); loadMoreBtn.Hide(); loadingIndicator.Hide(); return
+			dialog.ShowError(fmt.Errorf("API key is required"), myWindow)
+			return
 		}
 		if query == "" {
-			results.Objects = []fyne.CanvasObject{widget.NewLabelWithStyle("⚠️ Please enter a search query.", fyne.TextAlignCenter, fyne.TextStyle{Bold: true})}
-			results.Refresh(); loadMoreBtn.Hide(); loadingIndicator.Hide(); return
+			dialog.ShowError(fmt.Errorf("Search query is required"), myWindow)
+			return
 		}
-
-		results.Objects = nil 
+		results.Objects = nil
 		results.Add(loadingIndicator)
 		loadingIndicator.Show()
 		results.Refresh()
-		
 		loadMoreBtn.Hide()
 		currentPage = 1
 		lastQuery = query
-		lastFromDate = fromDate // Store for "Load More"
-		lastToDate = toDate     // Store for "Load More"
-		
-		fetchedArticles, total, err := fetchNews(key, query, fromDate, toDate, currentPage)
-		
-		loadingIndicator.Hide()
-		results.Objects = nil 
+		lastFromDate = fromDate
+		lastToDate = toDate
 
+		fetchedArticles, total, err := fetchNews(key, query, fromDate, toDate, currentPage)
+		loadingIndicator.Hide()
+		results.Objects = nil
 		if err != nil {
-			results.Add(widget.NewLabelWithStyle(fmt.Sprintf("❌ Error fetching news: %v", err), fyne.TextAlignCenter, fyne.TextStyle{Bold: true, Italic: true}))
-			results.Refresh(); loadMoreBtn.Hide(); allArticles = nil; return
+			dialog.ShowError(err, myWindow)
+			allArticles = nil
+			results.Refresh()
+			return
 		}
 		if len(fetchedArticles) == 0 {
-			results.Add(widget.NewLabelWithStyle("🔍 No results found for your query: '"+query+"'. Try different keywords.", fyne.TextAlignCenter, fyne.TextStyle{Italic: true}))
-			results.Refresh(); loadMoreBtn.Hide(); allArticles = nil; return
+			dialog.ShowInformation("Search Results", "No articles found.", myWindow)
+			allArticles = nil
+			results.Refresh()
+			return
 		}
-
 		totalResults = total
-		allArticles = fetchedArticles 
-		sortByTime(allArticles, sortAsc) 
+		allArticles = fetchedArticles
+		// Apply current sort mode after fetching new articles
+		switch currentSortMode {
+		case SortTimeDesc:
+			sortByTime(allArticles, false)
+		case SortTimeAsc:
+			sortByTime(allArticles, true)
+		case SortSentimentDesc:
+			sortBySentiment(allArticles, false)
+		case SortSentimentAsc:
+			sortBySentiment(allArticles, true)
+		}
 		refreshResultsUI()
-
 		if len(allArticles) < totalResults && len(allArticles) > 0 {
 			loadMoreBtn.Show()
 		} else {
 			loadMoreBtn.Hide()
 		}
-		if errSave := saveAPIKey(key); errSave != nil { 
-			fmt.Println("Error saving API key:", errSave) 
-		}
+		saveAPIKey(key)
 	})
-	
-	queryInput.OnSubmitted = func(s string) { 
-		searchBtn.OnTapped()
-	}
+
+	queryInput.OnSubmitted = func(s string) { searchBtn.OnTapped() }
 	fromDateEntry.OnSubmitted = func(s string) { searchBtn.OnTapped() }
 	toDateEntry.OnSubmitted = func(s string) { searchBtn.OnTapped() }
-
-
 	searchRow := container.NewBorder(nil, nil, nil, container.NewHBox(searchBtn, sortBtn), queryInput)
-
 	askAIInput := widget.NewEntry()
 	askAIInput.SetPlaceHolder("Ask a question about loaded articles...")
-	
 	showAIResponseDialog := func(title, content string) {
 		contentLabel := widget.NewLabel(content)
 		contentLabel.Wrapping = fyne.TextWrapWord
-		dialogVBox := container.NewVBox(
-			widget.NewLabelWithStyle(title, fyne.TextAlignCenter, fyne.TextStyle{Bold: true}),
-			widget.NewSeparator(),
-			container.NewVScroll(contentLabel), 
-			widget.NewSeparator(),
-		)
+		dialogVBox := container.NewVBox(widget.NewLabelWithStyle(title, fyne.TextAlignCenter, fyne.TextStyle{Bold: true}), widget.NewSeparator(), container.NewVScroll(contentLabel), widget.NewSeparator())
 		var modal *widget.PopUp
 		closeDialogBtn := widget.NewButtonWithIcon("Close", theme.CancelIcon(), func() { modal.Hide() })
-		modal = widget.NewModalPopUp(
-			container.NewBorder(nil, container.NewCenter(closeDialogBtn), nil, nil, dialogVBox),
-			myWindow.Canvas(),
-		)
+		modal = widget.NewModalPopUp(container.NewBorder(nil, container.NewCenter(closeDialogBtn), nil, nil, dialogVBox), myWindow.Canvas())
 		modal.Resize(fyne.NewSize(myWindow.Canvas().Size().Width*0.7, myWindow.Canvas().Size().Height*0.6))
 		modal.Show()
 	}
-
 	askBtn := widget.NewButtonWithIcon("Ask AI", theme.QuestionIcon(), func() {
 		question := askAIInput.Text
-		if question == "" { showAIResponseDialog("Ask AI Error", "Please enter a question to ask the AI."); return }
-		if len(allArticles) == 0 { showAIResponseDialog("Ask AI Info", "No articles loaded. Please perform a search first."); return }
-		answer := askAI(question, allArticles) 
+		if question == "" {
+			showAIResponseDialog("Ask AI Error", "Please enter a question.")
+			return
+		}
+		if len(allArticles) == 0 {
+			showAIResponseDialog("Ask AI Info", "No articles loaded.")
+			return
+		}
+		answer := askAI(question, allArticles) // Now defined
 		showAIResponseDialog("AI Response", answer)
 	})
-	askAIInput.OnSubmitted = func(s string) { 
-		askBtn.OnTapped()
-	}
-	
-	askAIRow := container.NewBorder(nil, nil, nil, askBtn, askAIInput) 
-
+	askAIInput.OnSubmitted = func(s string) { askBtn.OnTapped() }
+	askAIRow := container.NewBorder(nil, nil, nil, askBtn, askAIInput)
 	exportBtn := widget.NewButtonWithIcon("Export MD", theme.FileTextIcon(), func() {
-		if len(allArticles) == 0 { myApp.SendNotification(&fyne.Notification{Title: "Export Info", Content: "No articles to export."}); return }
+		if len(allArticles) == 0 {
+			myApp.SendNotification(&fyne.Notification{Title: "Export Info", Content: "No articles."})
+			return
+		}
 		var sb strings.Builder
-		sb.WriteString(fmt.Sprintf("# News Articles for Query: %s\n\n", lastQuery))
+		sb.WriteString(fmt.Sprintf("# News: %s\n\n", lastQuery))
 		for _, a := range allArticles {
-			sb.WriteString(fmt.Sprintf("## %s\n", a.Title))
-			sb.WriteString(fmt.Sprintf("- **URL**: <%s>\n", a.URL)) 
-			sb.WriteString(fmt.Sprintf("- **Published**: %s\n", humanTime(a.PublishedAt)))
-			sb.WriteString(fmt.Sprintf("- **Description**: %s\n", strings.TrimSpace(a.Description)))
-			sb.WriteString(fmt.Sprintf("- **Impact Score**: %d/100\n", a.ImpactScore))
-			sb.WriteString(fmt.Sprintf("- **Policy Relevance**: %d%%\n", a.PolicyProbability))
-			sb.WriteString(fmt.Sprintf("- **Summary (2 sentences)**: %s\n", summarizeText(a.Description)))
-			sb.WriteString("\n---\n\n")
+			sb.WriteString(fmt.Sprintf("## %s\n- URL: <%s>\n- Pub: %s\n- Src: %s\n- Desc: %s\n- Impact: %d\n- Policy: %d%%\n- Sentiment: %d\n- Sum: %s\n\n---\n\n", a.Title, a.URL, humanTime(a.PublishedAt), a.Source.Name, strings.TrimSpace(a.Description), a.ImpactScore, a.PolicyProbability, a.SentimentScore, summarizeText(a.Description))) // Now defined
 		}
-		home, errHome := os.UserHomeDir()
-		if errHome != nil { showAIResponseDialog("Export Error", "Could not determine user home directory."); return }
+		home, _ := os.UserHomeDir()
 		docDir := filepath.Join(home, "Documents")
-		if _, err := os.Stat(docDir); os.IsNotExist(err) {
-			if errMkdir := os.MkdirAll(docDir, 0755); errMkdir != nil { showAIResponseDialog("Export Error", fmt.Sprintf("Could not create Documents directory: %v", errMkdir)); return }
-		}
+		os.MkdirAll(docDir, 0755)
 		dateStr := time.Now().Format("2006-01-02")
 		safeQuery := strings.ReplaceAll(strings.ToLower(lastQuery), " ", "_")
-		safeQuery = strings.ReplaceAll(safeQuery, "/", "_") 
-		safeQuery = strings.ReplaceAll(safeQuery, "\\", "_")
-		if len(safeQuery) > 30 { safeQuery = safeQuery[:30] } 
+		safeQuery = regexp.MustCompile(`[^\w-]`).ReplaceAllString(safeQuery, "")
+		if len(safeQuery) > 30 {
+			safeQuery = safeQuery[:30]
+		}
 		fileName := fmt.Sprintf("news_export_%s_%s.md", safeQuery, dateStr)
-		path := filepath.Join(docDir, fileName) 
-		if err := os.WriteFile(path, []byte(sb.String()), 0644); err != nil { showAIResponseDialog("Export Error", fmt.Sprintf("Failed to write file to %s: %v", path, err)); return }
-		myApp.SendNotification(&fyne.Notification{Title: "Export Success", Content: fmt.Sprintf("Articles exported to %s", path)})
+		path := filepath.Join(docDir, fileName)
+		if err := os.WriteFile(path, []byte(sb.String()), 0644); err != nil {
+			showAIResponseDialog("Export Error", fmt.Sprintf("Failed: %v", err))
+			return
+		}
+		myApp.SendNotification(&fyne.Notification{Title: "Export OK", Content: path})
 	})
-
 	clipboardBtn := widget.NewButtonWithIcon("Copy All", theme.ContentCopyIcon(), func() {
-		if len(allArticles) == 0 { myApp.SendNotification(&fyne.Notification{Title: "Clipboard Info", Content: "No articles to copy."}); return }
+		if len(allArticles) == 0 {
+			myApp.SendNotification(&fyne.Notification{Title: "Clipboard Info", Content: "No articles."})
+			return
+		}
 		var sb strings.Builder
-		sb.WriteString(fmt.Sprintf("News Query: %s\n\n", lastQuery))
+		sb.WriteString(fmt.Sprintf("Query: %s\n\n", lastQuery))
 		for i, a := range allArticles {
-			sb.WriteString(fmt.Sprintf("Article %d: %s\n", i+1, a.Title))
-			sb.WriteString(fmt.Sprintf("  Link: %s\n", a.URL))
-			sb.WriteString(fmt.Sprintf("  Published: %s\n", humanTime(a.PublishedAt)))
-			sb.WriteString(fmt.Sprintf("  Summary: %s\n", summarizeText(a.Description)))
-			sb.WriteString("\n")
+			sb.WriteString(fmt.Sprintf("Art %d: %s\n Link: %s\n Pub: %s\n Sum: %s\n\n", i+1, a.Title, a.URL, humanTime(a.PublishedAt), summarizeText(a.Description))) // Now defined
 		}
 		myWindow.Clipboard().SetContent(sb.String())
-		myApp.SendNotification(&fyne.Notification{Title: "Clipboard Success", Content: fmt.Sprintf("%d article summaries copied.", len(allArticles))})
+		myApp.SendNotification(&fyne.Notification{Title: "Clipboard OK", Content: fmt.Sprintf("%d arts copied.", len(allArticles))})
 	})
-	
-	bookmarksBtn := widget.NewButtonWithIcon("Bookmarks", theme.FolderOpenIcon(), func() {
-		showBookmarksView()
-	})
-
-	utilityRow := container.NewHBox(layout.NewSpacer(), bookmarksBtn, exportBtn, clipboardBtn, layout.NewSpacer()) 
-
+	bookmarksBtn := widget.NewButtonWithIcon("Bookmarks", theme.FolderOpenIcon(), func() { showBookmarksView() })
+	trendBtn := widget.NewButtonWithIcon("Trend", theme.InfoIcon(), func() { showTrendAnalysisDialog() }) // Corrected: theme.InfoIcon()
+	utilityRow := container.NewHBox(layout.NewSpacer(), trendBtn, bookmarksBtn, exportBtn, clipboardBtn, layout.NewSpacer())
 	loadMoreBtn.OnTapped = func() {
 		currentPage++
 		key := keyInput.Text
-		// Use last used dates for loading more
 		fetchedArticles, _, err := fetchNews(key, lastQuery, lastFromDate, lastToDate, currentPage)
-		
-		if err != nil { myApp.SendNotification(&fyne.Notification{Title: "Load More Error", Content: err.Error()}); currentPage--; return }
-		if len(fetchedArticles) > 0 { 
-			allArticles = append(allArticles, fetchedArticles...) 
-			sortByTime(allArticles, sortAsc) 
-			refreshResultsUI()
-			scroll.ScrollToBottom() 
+		if err != nil {
+			myApp.SendNotification(&fyne.Notification{Title: "Load More Error", Content: err.Error()})
+			currentPage--
+			return
 		}
-		if len(allArticles) >= totalResults || len(fetchedArticles) == 0 { 
-			loadMoreBtn.Hide() 
+		if len(fetchedArticles) > 0 {
+			allArticles = append(allArticles, fetchedArticles...)
+			// Re-apply sort after loading more
+			switch currentSortMode {
+				case SortTimeDesc: sortByTime(allArticles, false)
+				case SortTimeAsc: sortByTime(allArticles, true)
+				case SortSentimentDesc: sortBySentiment(allArticles, false)
+				case SortSentimentAsc: sortBySentiment(allArticles, true)
+			}
+			refreshResultsUI()
+			scroll.ScrollToBottom()
+		}
+		if len(allArticles) >= totalResults || len(fetchedArticles) == 0 {
+			loadMoreBtn.Hide()
 		} else {
 			loadMoreBtn.Show()
 		}
 	}
-	
-	topControls := container.NewVBox(
-		apiKeyRow,
-		searchRow, 
-		dateFilterRow, // Add date filter row to layout
-		askAIRow,  
-		utilityRow,
-		widget.NewSeparator(), 
-	)
-
-	content := container.NewBorder(
-		topControls,       
-		loadMoreContainer, 
-		nil,               
-		nil,               
-		scroll,            
-	)
-
+	topControls := container.NewVBox(apiKeyRow, searchRow, dateFilterRow, askAIRow, utilityRow, widget.NewSeparator())
+	content := container.NewBorder(topControls, loadMoreContainer, nil, nil, scroll)
 	myWindow.SetContent(content)
 	myWindow.ShowAndRun()
 }
