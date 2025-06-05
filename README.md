@@ -21,6 +21,7 @@ This joint hits the NewsAPI to fetch the latest articles based on whatever you'r
 ## Before You Even Start
 
 Look, this whole thing runs on NewsAPI, so you need a key - non-negotiable. Head to [NewsAPI](https://newsapi.org/register) and get yours (it's free, don't trip). Without this, you might as well try to run a car with no gas.
+Have Ollama installed for ai summary - the only memory demanding task
 
 ## Setup
 
