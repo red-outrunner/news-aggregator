@@ -45,9 +45,6 @@ Then type whatever you're trying to read about when it asks. Simple as that.
 
 - `Article` struct: Holds the news piece details
 - `NewsResponse` struct: Manages the API response
-- `fetchNews()`: Handles the API call
-- `sortByLatest()`: Keeps everything chronological
-- `displayArticles()`: Formats everything clean for your terminal
 
 ## Pro Tips
 
