@@ -8,7 +8,7 @@ import (
     "os"
     "sort"
 )
-
+// add capabilty to enter api key on cli
 
 type Article struct {
     Title       string `json:"title"`
