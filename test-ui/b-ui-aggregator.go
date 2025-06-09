@@ -30,15 +30,15 @@ import (
 
 // Article struct updated to include URLToImage and SentimentScore
 type Article struct {
-	Title             string `json:"title"`
-	Description       string `json:"description"`
-	URL               string `json:"url"`
-	URLToImage        string `json:"urlToImage"`
-	PublishedAt       string `json:"publishedAt"`
-	ImpactScore       int    `json:"impactScore,omitempty"`
-	PolicyProbability int    `json:"policyProbability,omitempty"`
-	SentimentScore    int    `json:"sentimentScore,omitempty"` // Added for sentiment analysis
-	Source            struct {                               // NewsAPI often nests source info
+	Title             string   `json:"title"`
+	Description       string   `json:"description"`
+	URL               string   `json:"url"`
+	URLToImage        string   `json:"urlToImage"`
+	PublishedAt       string   `json:"publishedAt"`
+	ImpactScore       int      `json:"impactScore,omitempty"`
+	PolicyProbability int      `json:"policyProbability,omitempty"`
+	SentimentScore    int      `json:"sentimentScore,omitempty"` // Added for sentiment analysis
+	Source            struct { // NewsAPI often nests source info
 		ID   string `json:"id"`
 		Name string `json:"name"`
 	} `json:"source"`
@@ -62,8 +62,34 @@ var (
 const bookmarksFilename = "news_aggregator_bookmarks.json"
 
 // Sentiment keywords (simple lists for demonstration)
-var positiveKeywords = []string{"good", "great", "excellent", "positive", "success", "improve", "benefit", "breakthrough", "advance", "innovative", "efficient", "effective", "happy", "joy", "love", "strong", "grow", "upward", "boom", "achieve", "support", "launch", "optimistic"}
-var negativeKeywords = []string{"bad", "poor", "terrible", "negative", "fail", "crisis", "disaster", "loss", "decline", "risk", "warn", "threat", "problem", "issue", "concern", "down", "slump", "recession", "challenge", "cut", "reduce", "fear", "angry", "sad"}
+var positiveKeywords = []string{
+	// General Positive
+	"good", "great", "excellent", "positive", "success", "improve", "benefit", "effective", "strong", "happy", "joy", "love", "optimistic", "favorable", "promising", "encouraging",
+	// Growth & Expansion
+	"grow", "growth", "expansion", "expand", "increase", "surge", "rise", "upward", "upturn", "boom", "accelerate", "augment", "boost", "rally", "recover", "recovery",
+	// Achievement & Performance
+	"achieve", "achieved", "outperform", "exceed", "beat", "record", "profitable", "profit", "gains", "earnings", "revenue", "dividend", "surplus",
+	// Innovation & Advancement
+	"innovative", "innovation", "breakthrough", "advance", "launch", "new", "develop", "upgrade", "leading", "cutting-edge",
+	// Market Sentiment & Confidence
+	"bullish", "optimism", "confidence", "stable", "stability", "support", "demand", "hot", "high", "robust",
+	// Deals & Approvals
+	"acquire", "acquisition", "merger", "partnership", "agreement", "approve", "approved", "endorse", "confirm",
+}
+var negativeKeywords = []string{
+	// General Negative
+	"bad", "poor", "terrible", "negative", "fail", "failure", "weak", "adverse", "sad", "angry", "fear", "pessimistic", "unfavorable", "discouraging",
+	// Decline & Contraction
+	"decline", "decrease", "drop", "fall", "slump", "downturn", "recession", "contraction", "reduce", "cut", "loss", "losses", "deficit", "shrink", "erode", "weaken",
+	// Problems & Risks
+	"crisis", "disaster", "risk", "warn", "warning", "threat", "problem", "issue", "concern", "challenge", "obstacle", "difficulty", "uncertainty", "volatile", "volatility",
+	// Poor Performance
+	"underperform", "miss", "shortfall", "struggle", "stagnate", "delay", "halt",
+	// Market Sentiment & Lack of Confidence
+	"bearish", "pessimism", "doubt", "skepticism", "unstable", "instability", "pressure", "low", "oversupply", "bubble",
+	// Legal & Regulatory Issues
+	"investigation", "lawsuit", "penalty", "fine", "sanction", "ban", "fraud", "scandal", "recall", "dispute", "reject", "denied", "downgrade",
+}
 
 // --- Utility Functions (Sorting, Time, etc.) ---
 func sortByTime(articles []Article, ascending bool) {
@@ -93,16 +119,16 @@ func humanTime(tStr string) string {
 	}
 	dur := time.Since(t)
 	switch {
-		case dur < time.Minute:
-			return "just now"
-		case dur < time.Hour:
-			return fmt.Sprintf("%dm ago", int(dur.Minutes()))
-		case dur < 24*time.Hour:
-			return fmt.Sprintf("%dh ago", int(dur.Hours()))
-		case dur < 7*24*time.Hour:
-			return fmt.Sprintf("%dd ago", int(dur.Hours()/24))
-		default:
-			return t.Format("Jan 2, 2006")
+	case dur < time.Minute:
+		return "just now"
+	case dur < time.Hour:
+		return fmt.Sprintf("%dm ago", int(dur.Minutes()))
+	case dur < 24*time.Hour:
+		return fmt.Sprintf("%dh ago", int(dur.Hours()))
+	case dur < 7*24*time.Hour:
+		return fmt.Sprintf("%dd ago", int(dur.Hours()/24))
+	default:
+		return t.Format("Jan 2, 2006")
 	}
 }
 
@@ -254,9 +280,9 @@ func fetchNews(apiKey, query, fromDate, toDate string, page int) ([]Article, int
 			}
 		} else if len(newsResponse.Articles) > 0 && newsResponse.Articles[0].Title != "" &&
 			(strings.Contains(strings.ToLower(newsResponse.Articles[0].Title), "error") || newsResponse.Articles[0].Description == "") {
-				errMsg = newsResponse.Articles[0].Title
-			}
-			return nil, 0, fmt.Errorf("API error: %s. Full response: %s", errMsg, string(body))
+			errMsg = newsResponse.Articles[0].Title
+		}
+		return nil, 0, fmt.Errorf("API error: %s. Full response: %s", errMsg, string(body))
 	}
 
 	for i := range newsResponse.Articles {
@@ -588,13 +614,21 @@ func main() {
 				go func(imgURL string, targetImg *canvas.Image) {
 					client := http.Client{Timeout: 15 * time.Second}
 					resp, err := client.Get(imgURL)
-					if err != nil { return }
+					if err != nil {
+						return
+					}
 					defer resp.Body.Close()
-					if resp.StatusCode != http.StatusOK { return }
+					if resp.StatusCode != http.StatusOK {
+						return
+					}
 					imgData, err := io.ReadAll(resp.Body)
-					if err != nil { return }
+					if err != nil {
+						return
+					}
 					_, _, err = image.Decode(bytes.NewReader(imgData))
-					if err != nil { return }
+					if err != nil {
+						return
+					}
 					imgRes := fyne.NewStaticResource(filepath.Base(imgURL), imgData)
 					targetImg.Resource = imgRes
 					targetImg.Refresh()
@@ -761,26 +795,26 @@ func main() {
 	sortBtn := widget.NewButtonWithIcon("Sort: Time ↓", theme.MenuDropDownIcon(), nil)
 	sortBtn.OnTapped = func() {
 		switch currentSortMode {
-			case SortTimeDesc:
-				currentSortMode = SortTimeAsc
-				sortBtn.SetText("Sort: Time ↑")
-				sortBtn.SetIcon(theme.MenuDropUpIcon())
-				sortByTime(allArticles, true)
-			case SortTimeAsc:
-				currentSortMode = SortSentimentDesc
-				sortBtn.SetText("Sort: Sentiment ↓")
-				sortBtn.SetIcon(theme.MenuDropDownIcon())
-				sortBySentiment(allArticles, false)
-			case SortSentimentDesc:
-				currentSortMode = SortSentimentAsc
-				sortBtn.SetText("Sort: Sentiment ↑")
-				sortBtn.SetIcon(theme.MenuDropUpIcon())
-				sortBySentiment(allArticles, true)
-			case SortSentimentAsc:
-				currentSortMode = SortTimeDesc
-				sortBtn.SetText("Sort: Time ↓")
-				sortBtn.SetIcon(theme.MenuDropDownIcon())
-				sortByTime(allArticles, false)
+		case SortTimeDesc:
+			currentSortMode = SortTimeAsc
+			sortBtn.SetText("Sort: Time ↑")
+			sortBtn.SetIcon(theme.MenuDropUpIcon())
+			sortByTime(allArticles, true)
+		case SortTimeAsc:
+			currentSortMode = SortSentimentDesc
+			sortBtn.SetText("Sort: Sentiment ↓")
+			sortBtn.SetIcon(theme.MenuDropDownIcon())
+			sortBySentiment(allArticles, false)
+		case SortSentimentDesc:
+			currentSortMode = SortSentimentAsc
+			sortBtn.SetText("Sort: Sentiment ↑")
+			sortBtn.SetIcon(theme.MenuDropUpIcon())
+			sortBySentiment(allArticles, true)
+		case SortSentimentAsc:
+			currentSortMode = SortTimeDesc
+			sortBtn.SetText("Sort: Time ↓")
+			sortBtn.SetIcon(theme.MenuDropDownIcon())
+			sortByTime(allArticles, false)
 		}
 		refreshResultsUI()
 	}
@@ -826,14 +860,14 @@ func main() {
 		totalResults = total
 		allArticles = fetchedArticles
 		switch currentSortMode {
-			case SortTimeDesc:
-				sortByTime(allArticles, false)
-			case SortTimeAsc:
-				sortByTime(allArticles, true)
-			case SortSentimentDesc:
-				sortBySentiment(allArticles, false)
-			case SortSentimentAsc:
-				sortBySentiment(allArticles, true)
+		case SortTimeDesc:
+			sortByTime(allArticles, false)
+		case SortTimeAsc:
+			sortByTime(allArticles, true)
+		case SortSentimentDesc:
+			sortBySentiment(allArticles, false)
+		case SortSentimentAsc:
+			sortBySentiment(allArticles, true)
 		}
 		refreshResultsUI()
 		if len(allArticles) < totalResults && len(allArticles) > 0 {
@@ -908,14 +942,14 @@ func main() {
 		if len(fetchedArticles) > 0 {
 			allArticles = append(allArticles, fetchedArticles...)
 			switch currentSortMode {
-				case SortTimeDesc:
-					sortByTime(allArticles, false)
-				case SortTimeAsc:
-					sortByTime(allArticles, true)
-				case SortSentimentDesc:
-					sortBySentiment(allArticles, false)
-				case SortSentimentAsc:
-					sortBySentiment(allArticles, true)
+			case SortTimeDesc:
+				sortByTime(allArticles, false)
+			case SortTimeAsc:
+				sortByTime(allArticles, true)
+			case SortSentimentDesc:
+				sortBySentiment(allArticles, false)
+			case SortSentimentAsc:
+				sortBySentiment(allArticles, true)
 			}
 			refreshResultsUI()
 			scroll.ScrollToBottom()
