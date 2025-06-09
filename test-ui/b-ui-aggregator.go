@@ -91,6 +91,11 @@ var negativeKeywords = []string{
 	"investigation", "lawsuit", "penalty", "fine", "sanction", "ban", "fraud", "scandal", "recall", "dispute", "reject", "denied", "downgrade",
 }
 
+// Market-driving keywords for impact score calculation
+var impactScoreKeywords = []string{
+	"recession", "inflation", "interest rates", "market crash", "trade war", "supply chain", "corporate earnings", "acquisition", "ipo", "federal reserve", "economic growth", "unemployment", "government stimulus", "new regulation", "geopolitical risk", "tariff", "sanction", "deficit", "surplus", "bankruptcy", "takeover", "merger", "venture capital", "private equity", "stock market", "bond market", "currency fluctuation", "commodity prices", "consumer spending", "housing market", "energy crisis", "financial crisis", "debt ceiling", "quantitative easing", "fiscal policy", "monetary policy", "trade deal", "market sentiment", "volatility", "correction", "bear market", "bull market", "earnings report", "profit warning", "economic forecast", "global economy", "emerging markets",
+}
+
 // --- Utility Functions (Sorting, Time, etc.) ---
 func sortByTime(articles []Article, ascending bool) {
 	sort.Slice(articles, func(i, j int) bool {
@@ -407,10 +412,9 @@ func isRead(articleURL string) bool {
 	return readArticles[articleURL]
 }
 func calculateImpactScore(text string) int {
-	keywords := []string{"recession", "inflation", "interest rates", "market crash", "trade war", "supply chain", "corporate earnings", "acquisition", "ipo", "federal reserve", "economic growth", "unemployment", "government stimulus", "new regulation", "geopolitical risk"}
 	score := 0
 	textLower := strings.ToLower(text)
-	for _, k := range keywords {
+	for _, k := range impactScoreKeywords {
 		if strings.Contains(textLower, k) {
 			score += 7
 		}
