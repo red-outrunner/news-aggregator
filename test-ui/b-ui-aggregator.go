@@ -407,7 +407,7 @@ func isRead(articleURL string) bool {
 	return readArticles[articleURL]
 }
 func calculateImpactScore(text string) int {
-	keywords := []string{"crisis", "breakthrough", "disaster", "economy", "war", "pandemic", "reform", "urgent", "major", "global", "election", "protest", "conflict", "threat"}
+	keywords := []string{"recession", "inflation", "interest rates", "market crash", "trade war", "supply chain", "corporate earnings", "acquisition", "ipo", "federal reserve", "economic growth", "unemployment", "government stimulus", "new regulation", "geopolitical risk"}
 	score := 0
 	textLower := strings.ToLower(text)
 	for _, k := range keywords {
