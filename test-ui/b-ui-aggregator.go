@@ -418,7 +418,7 @@ func calculateImpactScore(text string) int {
 	return min(100, score)
 }
 func calculatePolicyProbability(text string) int {
-	keywords := []string{"policy", "regulation", "law", "government", "legislation", "bill", "congress", "senate", "parliament", "decree", "treaty", "court", "ruling", "initiative"}
+	keywords := []string{"policy", "regulation", "law", "government", "legislation", "bill", "congress", "senate", "parliament", "decree", "treaty", "court", "ruling", "initiative", "mandate", "executive order", "tariff", "sanction", "subsidy", "public policy", "compliance", "enforcement", "oversight", "hearing", "testimony", "budget", "appropriation", "act", "statute", "ordinance", "directive", "guideline", "framework", "accord", "pact", "resolution", "referendum", "lobbying", "advocacy", "think tank", "white paper", "federal", "state", "local government", "agency", "commission", "authority"}
 	score := 0
 	textLower := strings.ToLower(text)
 	for _, k := range keywords {
