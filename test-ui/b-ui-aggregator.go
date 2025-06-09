@@ -93,7 +93,30 @@ var negativeKeywords = []string{
 
 // Market-driving keywords for impact score calculation
 var impactScoreKeywords = []string{
+	// General Market Drivers
 	"recession", "inflation", "interest rates", "market crash", "trade war", "supply chain", "corporate earnings", "acquisition", "ipo", "federal reserve", "economic growth", "unemployment", "government stimulus", "new regulation", "geopolitical risk", "tariff", "sanction", "deficit", "surplus", "bankruptcy", "takeover", "merger", "venture capital", "private equity", "stock market", "bond market", "currency fluctuation", "commodity prices", "consumer spending", "housing market", "energy crisis", "financial crisis", "debt ceiling", "quantitative easing", "fiscal policy", "monetary policy", "trade deal", "market sentiment", "volatility", "correction", "bear market", "bull market", "earnings report", "profit warning", "economic forecast", "global economy", "emerging markets",
+	// EU Specific Market Drivers
+	"ecb", "european central bank", "eurozone", "brexit impact", "eu stimulus", "recovery fund", "dax", "cac 40", "ftse mib", "euro stoxx 50", "sovereign debt", "eu bailout", "esm", "european stability mechanism",
+	// South African Specific Market Drivers
+	"sarb", "south african reserve bank", "jse", "johannesburg stock exchange", "rand", "load shedding", "eskom", "mining sector sa", "sa budget", "credit rating south africa", "foreign direct investment sa", "state owned enterprises sa", "bee impact",
+}
+
+// Policy-related keywords for probability calculation
+var policyKeywords = []string{
+	// General & US Focused (many are broadly applicable)
+	"policy", "regulation", "law", "government", "legislation", "bill", "congress", "senate", "parliament", "decree", "treaty", "court", "ruling", "initiative", "mandate", "executive order", "tariff", "sanction", "subsidy", "public policy", "compliance", "enforcement", "oversight", "hearing", "testimony", "budget", "appropriation", "act", "statute", "ordinance", "directive", "guideline", "framework", "accord", "pact", "resolution", "referendum", "lobbying", "advocacy", "think tank", "white paper", "federal", "state", "local government", "agency", "commission", "authority", "irs", "federal reserve", "supreme court", "white house", "capitol hill", "reform", "governance", "judiciary",
+	// EU Specific
+	"european parliament", "european commission", "council of the european union", "eu directive", "eu regulation", "mep", "ecj", "eurozone", "brussels", "ecb", "european central bank", "single market", "schengen", "brexit", "article 50", "eusl", "gdpr",
+	// UK Specific (examples, as often related to EU context or distinct major economy)
+	"parliament uk", "house of commons", "house of lords", "downing street", "hmrc", "bank of england", "chancellor",
+	// South African Specific
+	"parliament sa", "national assembly sa", "national council of provinces", "ncop", "sars", "south african revenue service", "constitutional court sa", "concourt", "provincial government sa", "cabinet sa", "cosatu", "public protector sa", "union buildings", "south african reserve bank", "sarb", "anc", "da", "eff", "state capture", "bee", "black economic empowerment", "land reform", "national development plan", "ndp", "municipal",
+	// Other International Bodies/Terms
+	"united nations", "unsc", "world bank", "imf", "wto", "who", "icc", "g7", "g20", "oecd",
+	// Generic legislative body names from other major regions (examples)
+	"bundestag", // Germany
+	"diet",      // Japan
+	"duma",      // Russia
 }
 
 // --- Utility Functions (Sorting, Time, etc.) ---
@@ -422,10 +445,9 @@ func calculateImpactScore(text string) int {
 	return min(100, score)
 }
 func calculatePolicyProbability(text string) int {
-	keywords := []string{"policy", "regulation", "law", "government", "legislation", "bill", "congress", "senate", "parliament", "decree", "treaty", "court", "ruling", "initiative", "mandate", "executive order", "tariff", "sanction", "subsidy", "public policy", "compliance", "enforcement", "oversight", "hearing", "testimony", "budget", "appropriation", "act", "statute", "ordinance", "directive", "guideline", "framework", "accord", "pact", "resolution", "referendum", "lobbying", "advocacy", "think tank", "white paper", "federal", "state", "local government", "agency", "commission", "authority"}
 	score := 0
 	textLower := strings.ToLower(text)
-	for _, k := range keywords {
+	for _, k := range policyKeywords {
 		if strings.Contains(textLower, k) {
 			score += 10
 		}
