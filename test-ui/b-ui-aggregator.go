@@ -61,6 +61,9 @@ var (
 	// Keyword sets for efficient lookup
 	positiveKeywordsSet map[string]struct{}
 	negativeKeywordsSet map[string]struct{}
+
+	// Regex for sanitizing filenames, pre-compiled for efficiency
+	safeFilenameRegex *regexp.Regexp
 )
 
 const bookmarksFilename = "news_aggregator_bookmarks.json"
@@ -135,6 +138,9 @@ func init() {
 	}
 	// For impactScoreKeywords and policyKeywords, they contain phrases and use strings.Contains.
 	// The main optimization (ToLower once on text) is already in place for those functions.
+
+	// Pre-compile regex for filename sanitization
+	safeFilenameRegex = regexp.MustCompile(`[^\w-]`)
 }
 
 // --- Utility Functions (Sorting, Time, etc.) ---
@@ -562,26 +568,12 @@ func main() {
 	var showTrendAnalysisDialog func()
 
 	// Helper for RichText highlighting
-	createHighlightedText := func(text, query string) *widget.RichText {
+	createHighlightedText := func(text, query string, highlightRegex *regexp.Regexp) *widget.RichText {
 		richText := widget.NewRichText()
-		if query == "" {
+		if query == "" || highlightRegex == nil {
 			richText.Segments = []widget.RichTextSegment{&widget.TextSegment{Text: text}}
 			return richText
 		}
-
-		queryWords := strings.Fields(strings.ToLower(query))
-		var reParts []string
-		for _, qw := range queryWords {
-			if len(qw) > 0 {
-				reParts = append(reParts, regexp.QuoteMeta(qw))
-			}
-		}
-		if len(reParts) == 0 {
-			richText.Segments = []widget.RichTextSegment{&widget.TextSegment{Text: text}}
-			return richText
-		}
-
-		highlightRegex := regexp.MustCompile(`(?i)\b(` + strings.Join(reParts, "|") + `)\b`)
 
 		matches := highlightRegex.FindAllStringIndex(text, -1)
 		lastIndex := 0
@@ -617,11 +609,26 @@ func main() {
 			return
 		}
 
+		var currentHighlightRegex *regexp.Regexp
+		if lastQuery != "" {
+			queryWords := strings.Fields(strings.ToLower(lastQuery))
+			var reParts []string
+			for _, qw := range queryWords {
+				if len(qw) > 0 { // Ensure word is not empty
+					reParts = append(reParts, regexp.QuoteMeta(qw))
+				}
+			}
+			if len(reParts) > 0 {
+				currentHighlightRegex = regexp.MustCompile(`(?i)\b(` + strings.Join(reParts, "|") + `)\b`)
+			}
+		}
+
 		for i := range allArticles {
 			article := allArticles[i]
 			parsedURL, _ := url.Parse(article.URL)
 
-			titleRichText := createHighlightedText(article.Title, lastQuery)
+			// Pass the pre-compiled regex to the helper
+			titleRichText := createHighlightedText(article.Title, lastQuery, currentHighlightRegex)
 			var currentTitleStyle fyne.TextStyle
 			if isRead(article.URL) {
 				currentTitleStyle.Italic = true
@@ -650,7 +657,7 @@ func main() {
 			if strings.TrimSpace(cardDescription) == "" {
 				cardDescription = "No description."
 			}
-			descriptionRichText := createHighlightedText(cardDescription, lastQuery)
+			descriptionRichText := createHighlightedText(cardDescription, lastQuery, currentHighlightRegex)
 			descriptionRichText.Wrapping = fyne.TextWrapWord
 
 			imgWidget := canvas.NewImageFromResource(nil)
@@ -948,7 +955,7 @@ func main() {
 		os.MkdirAll(docDir, 0755)
 		dateStr := time.Now().Format("2006-01-02")
 		safeQuery := strings.ReplaceAll(strings.ToLower(lastQuery), " ", "_")
-		safeQuery = regexp.MustCompile(`[^\w-]`).ReplaceAllString(safeQuery, "")
+		safeQuery = safeFilenameRegex.ReplaceAllString(safeQuery, "") // Use pre-compiled regex
 		if len(safeQuery) > 30 {
 			safeQuery = safeQuery[:30]
 		}
