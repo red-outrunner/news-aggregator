@@ -57,6 +57,10 @@ var (
 	bookmarksFilePath  string
 	readArticles       map[string]bool
 	readArticlesMutex  sync.Mutex
+
+	// Keyword sets for efficient lookup
+	positiveKeywordsSet map[string]struct{}
+	negativeKeywordsSet map[string]struct{}
 )
 
 const bookmarksFilename = "news_aggregator_bookmarks.json"
@@ -117,6 +121,20 @@ var policyKeywords = []string{
 	"bundestag", // Germany
 	"diet",      // Japan
 	"duma",      // Russia
+}
+
+func init() {
+	positiveKeywordsSet = make(map[string]struct{}, len(positiveKeywords))
+	for _, k := range positiveKeywords {
+		positiveKeywordsSet[strings.ToLower(k)] = struct{}{}
+	}
+
+	negativeKeywordsSet = make(map[string]struct{}, len(negativeKeywords))
+	for _, k := range negativeKeywords {
+		negativeKeywordsSet[strings.ToLower(k)] = struct{}{}
+	}
+	// For impactScoreKeywords and policyKeywords, they contain phrases and use strings.Contains.
+	// The main optimization (ToLower once on text) is already in place for those functions.
 }
 
 // --- Utility Functions (Sorting, Time, etc.) ---
@@ -226,21 +244,23 @@ func summarizeText(text string) string {
 
 // --- Core Logic (Fetch, Sentiment, etc.) ---
 func calculateSentimentScore(text string) int {
+	if text == "" {
+		return 0
+	}
 	score := 0
 	textLower := strings.ToLower(text)
+	// Using a simple word splitter. For more complex scenarios, a more robust tokenizer might be needed.
 	words := strings.FieldsFunc(textLower, func(r rune) bool {
-		return !strings.ContainsRune("abcdefghijklmnopqrstuvwxyz0123456789", r) // Basic word split
+		// Split on anything not a letter or digit
+		return !((r >= 'a' && r <= 'z') || (r >= '0' && r <= '9'))
 	})
 	for _, word := range words {
-		for _, pk := range positiveKeywords {
-			if word == pk {
-				score += 10
-			}
+		// word is already lowercase due to textLower and splitter behavior
+		if _, found := positiveKeywordsSet[word]; found {
+			score += 10
 		}
-		for _, nk := range negativeKeywords {
-			if word == nk {
-				score -= 10
-			}
+		if _, found := negativeKeywordsSet[word]; found {
+			score -= 10
 		}
 	}
 	if score > 100 {
