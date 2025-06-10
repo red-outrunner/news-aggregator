@@ -464,7 +464,7 @@ func min(a, b int) int {
 // --- Main Application ---
 func main() {
 	myApp := app.NewWithID("com.example.newsaggregator.marketresearch.v2")
-	myWindow := myApp.NewWindow("Market Research News Tool")
+	myWindow := myApp.NewWindow("News on Red:market research tool")
 	myWindow.Resize(fyne.NewSize(1000, 850))
 
 	setupBookmarksPath()
