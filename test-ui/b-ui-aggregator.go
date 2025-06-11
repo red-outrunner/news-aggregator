@@ -350,54 +350,87 @@ func fetchNews(apiKey, query, fromDate, toDate string, page int) ([]Article, int
 
 // --- Config & Persistence ---
 func loadSavedKey() string {
-	home, _ := os.UserHomeDir()
+	home, err := os.UserHomeDir()
+	if err != nil {
+		fmt.Fprintf(os.Stderr, "Error getting user home dir for API key: %v\n", err)
+		return ""
+	}
 	path := filepath.Join(home, ".config", "news_aggregator_apikey.txt")
 	data, err := os.ReadFile(path)
 	if err != nil {
+		if !os.IsNotExist(err) {
+			fmt.Fprintf(os.Stderr, "Error reading API key file %s: %v\n", path, err)
+		}
 		return ""
 	}
 	return strings.TrimSpace(string(data))
 }
 func saveAPIKey(key string) error {
-	home, _ := os.UserHomeDir()
+	home, err := os.UserHomeDir()
+	if err != nil {
+		return fmt.Errorf("error getting user home dir for API key: %w", err)
+	}
 	dir := filepath.Join(home, ".config")
-	os.MkdirAll(dir, 0700)
+	if err := os.MkdirAll(dir, 0700); err != nil {
+		return fmt.Errorf("error creating config directory %s: %w", dir, err)
+	}
 	path := filepath.Join(dir, "news_aggregator_apikey.txt")
-	return os.WriteFile(path, []byte(key), 0600)
+	if err := os.WriteFile(path, []byte(key), 0600); err != nil {
+		return fmt.Errorf("error writing API key to %s: %w", path, err)
+	}
+	return nil
 }
 func loadThemePreference() bool {
-	home, _ := os.UserHomeDir()
+	home, err := os.UserHomeDir()
+	if err != nil {
+		fmt.Fprintf(os.Stderr, "Error getting user home dir for theme: %v\n", err)
+		return false // Default to light theme on error
+	}
 	path := filepath.Join(home, ".config", "news_aggregator_theme.txt")
 	data, err := os.ReadFile(path)
 	if err != nil {
+		if !os.IsNotExist(err) {
+			fmt.Fprintf(os.Stderr, "Error reading theme preference file %s: %v\n", path, err)
+		}
 		return false
 	}
 	return strings.TrimSpace(string(data)) == "dark"
 }
 func saveThemePreference(isDark bool) error {
-	home, _ := os.UserHomeDir()
+	home, err := os.UserHomeDir()
+	if err != nil {
+		return fmt.Errorf("error getting user home dir for theme: %w", err)
+	}
 	dir := filepath.Join(home, ".config")
-	os.MkdirAll(dir, 0700)
+	if err := os.MkdirAll(dir, 0700); err != nil {
+		return fmt.Errorf("error creating config directory %s for theme: %w", dir, err)
+	}
 	path := filepath.Join(dir, "news_aggregator_theme.txt")
 	theme := "light"
 	if isDark {
 		theme = "dark"
 	}
-	return os.WriteFile(path, []byte(theme), 0600)
+	if err := os.WriteFile(path, []byte(theme), 0600); err != nil {
+		return fmt.Errorf("error writing theme preference to %s: %w", path, err)
+	}
+	return nil
 }
 func setupBookmarksPath() {
 	home, err := os.UserHomeDir()
 	if err != nil {
+		fmt.Fprintf(os.Stderr, "Error getting user home dir for bookmarks: %v. Using default path.\n", err)
 		bookmarksFilePath = bookmarksFilename
 		return
 	}
 	configDir := filepath.Join(home, ".config", "newsaggregator_v3")
 	if err := os.MkdirAll(configDir, 0700); err != nil {
+		fmt.Fprintf(os.Stderr, "Error creating config directory %s for bookmarks: %v. Using default path.\n", configDir, err)
 		bookmarksFilePath = bookmarksFilename
 		return
 	}
 	bookmarksFilePath = filepath.Join(configDir, bookmarksFilename)
 }
+
 func loadBookmarks() {
 	bookmarksMutex.Lock()
 	defer bookmarksMutex.Unlock()
@@ -407,15 +440,24 @@ func loadBookmarks() {
 		return
 	}
 	if err := json.Unmarshal(data, &bookmarkedArticles); err != nil {
+		fmt.Fprintf(os.Stderr, "Error unmarshalling bookmarks from %s: %v\n", bookmarksFilePath, err)
 		bookmarkedArticles = []Article{}
 	}
 }
+
 func saveBookmarks() {
 	bookmarksMutex.Lock()
 	defer bookmarksMutex.Unlock()
-	data, _ := json.MarshalIndent(bookmarkedArticles, "", "  ")
-	os.WriteFile(bookmarksFilePath, data, 0600)
+	data, err := json.MarshalIndent(bookmarkedArticles, "", "  ")
+	if err != nil {
+		fmt.Fprintf(os.Stderr, "Error marshalling bookmarks: %v\n", err)
+		return
+	}
+	if err := os.WriteFile(bookmarksFilePath, data, 0600); err != nil {
+		fmt.Fprintf(os.Stderr, "Error writing bookmarks file %s: %v\n", bookmarksFilePath, err)
+	}
 }
+
 func isBookmarked(articleURL string) bool {
 	bookmarksMutex.Lock()
 	defer bookmarksMutex.Unlock()
@@ -426,6 +468,7 @@ func isBookmarked(articleURL string) bool {
 	}
 	return false
 }
+
 func toggleBookmark(article Article) {
 	bookmarksMutex.Lock()
 	found := false
@@ -444,6 +487,7 @@ func toggleBookmark(article Article) {
 	bookmarksMutex.Unlock()
 	saveBookmarks()
 }
+
 func markAsRead(articleURL string) {
 	readArticlesMutex.Lock()
 	defer readArticlesMutex.Unlock()
@@ -452,6 +496,7 @@ func markAsRead(articleURL string) {
 	}
 	readArticles[articleURL] = true
 }
+
 func isRead(articleURL string) bool {
 	readArticlesMutex.Lock()
 	defer readArticlesMutex.Unlock()
@@ -460,6 +505,7 @@ func isRead(articleURL string) bool {
 	}
 	return readArticles[articleURL]
 }
+
 func calculateImpactScore(text string) int {
 	score := 0
 	textLower := strings.ToLower(text)
@@ -470,6 +516,7 @@ func calculateImpactScore(text string) int {
 	}
 	return min(100, score)
 }
+
 func calculatePolicyProbability(text string) int {
 	score := 0
 	textLower := strings.ToLower(text)
@@ -480,6 +527,7 @@ func calculatePolicyProbability(text string) int {
 	}
 	return min(100, score)
 }
+
 func min(a, b int) int {
 	if a < b {
 		return a
@@ -542,7 +590,9 @@ func main() {
 			myApp.Settings().SetTheme(theme.LightTheme())
 		}
 		updateThemeButtonText(isDarkTheme)
-		saveThemePreference(isDarkTheme)
+		if errSave := saveThemePreference(isDarkTheme); errSave != nil {
+			fmt.Fprintf(os.Stderr, "Error saving theme preference: %v\n", errSave)
+		}
 	}
 	apiKeyLabel := widget.NewLabel("API Key:")
 	apiKeyRow := container.NewBorder(nil, nil, apiKeyLabel, themeBtn, keyInput)
@@ -928,7 +978,10 @@ func main() {
 		} else {
 			loadMoreBtn.Hide()
 		}
-		saveAPIKey(key)
+		if errSave := saveAPIKey(key); errSave != nil {
+			fmt.Fprintf(os.Stderr, "Error saving API key: %v\n", errSave)
+			// Optionally, inform the user via a dialog or notification if critical
+		}
 	})
 
 	queryInput.OnSubmitted = func(s string) { searchBtn.OnTapped() }
