@@ -70,7 +70,7 @@ Then type whatever you're trying to read about when it asks. Simple as that.
 
 See something you could make better? Pull requests are welcome. No bureaucracy - just make it work better.
 
-Built with Go, powered by NewsAPI, and zero bloat. Questions? Drop an issue in the repo.
+Built with Go, powered by NewsAPI, and zero bloat. Drop an issue in the repo.
 
 ## GUI mode changes coming soon bro's
 
