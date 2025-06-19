@@ -2,6 +2,8 @@ package main
 
 import (
 	"bytes"
+	"crypto/sha256"
+	"encoding/hex"
 	"encoding/json"
 	"fmt"
 	"image"
@@ -30,14 +32,14 @@ import (
 
 // Article struct updated to include URLToImage and SentimentScore
 type Article struct {
-	Title             string   `json:"title"`
-	Description       string   `json:"description"`
-	URL               string   `json:"url"`
-	URLToImage        string   `json:"urlToImage"`
-	PublishedAt       string   `json:"publishedAt"`
-	ImpactScore       int      `json:"impactScore,omitempty"`
-	PolicyProbability int      `json:"policyProbability,omitempty"`
-	SentimentScore    int      `json:"sentimentScore,omitempty"` // Added for sentiment analysis
+	Title             string `json:"title"`
+	Description       string `json:"description"`
+	URL               string `json:"url"`
+	URLToImage        string `json:"urlToImage"`
+	PublishedAt       string `json:"publishedAt"`
+	ImpactScore       int    `json:"impactScore,omitempty"`
+	PolicyProbability int    `json:"policyProbability,omitempty"`
+	SentimentScore    int    `json:"sentimentScore,omitempty"` // Added for sentiment analysis
 	Source            struct { // NewsAPI often nests source info
 		ID   string `json:"id"`
 		Name string `json:"name"`
@@ -58,6 +60,9 @@ var (
 	readArticles       map[string]bool
 	readArticlesMutex  sync.Mutex
 
+	// Image cache directory
+	imageCacheDir string // Added for caching
+
 	// Keyword sets for efficient lookup
 	positiveKeywordsSet map[string]struct{}
 	negativeKeywordsSet map[string]struct{}
@@ -68,7 +73,7 @@ var (
 
 const bookmarksFilename = "news_aggregator_bookmarks.json"
 
-// Sentiment keywords (simple lists for demonstration)
+// Sentiment keywords
 var positiveKeywords = []string{
 	// General Positive
 	"good", "great", "excellent", "positive", "success", "improve", "benefit", "effective", "strong", "happy", "joy", "love", "optimistic", "favorable", "promising", "encouraging",
@@ -98,7 +103,6 @@ var negativeKeywords = []string{
 	"investigation", "lawsuit", "penalty", "fine", "sanction", "ban", "fraud", "scandal", "recall", "dispute", "reject", "denied", "downgrade",
 }
 
-// Market-driving keywords for impact score calculation
 var impactScoreKeywords = []string{
 	// General Market Drivers
 	"recession", "inflation", "interest rates", "market crash", "trade war", "supply chain", "corporate earnings", "acquisition", "ipo", "federal reserve", "economic growth", "unemployment", "government stimulus", "new regulation", "geopolitical risk", "tariff", "sanction", "deficit", "surplus", "bankruptcy", "takeover", "merger", "venture capital", "private equity", "stock market", "bond market", "currency fluctuation", "commodity prices", "consumer spending", "housing market", "energy crisis", "financial crisis", "debt ceiling", "quantitative easing", "fiscal policy", "monetary policy", "trade deal", "market sentiment", "volatility", "correction", "bear market", "bull market", "earnings report", "profit warning", "economic forecast", "global economy", "emerging markets",
@@ -349,6 +353,37 @@ func fetchNews(apiKey, query, fromDate, toDate string, page int) ([]Article, int
 }
 
 // --- Config & Persistence ---
+func setupImageCacheDir() {
+	home, err := os.UserHomeDir()
+	if err != nil {
+		// Fallback to a local directory if home can't be found
+		imageCacheDir = "image_cache"
+		os.MkdirAll(imageCacheDir, 0700)
+		return
+	}
+	// Use the same base config directory as bookmarks for consistency
+	configDir := filepath.Join(home, ".config", "newsaggregator_v3")
+	imageCacheDir = filepath.Join(configDir, "image_cache")
+	if err := os.MkdirAll(imageCacheDir, 0700); err != nil {
+		fmt.Println("Warning: Could not create image cache directory:", err)
+		// Fallback if creation fails
+		imageCacheDir = "image_cache"
+		os.MkdirAll(imageCacheDir, 0700)
+	}
+}
+
+func getCachePathForURL(imageURL string) string {
+	hasher := sha256.New()
+	hasher.Write([]byte(imageURL))
+	hash := hex.EncodeToString(hasher.Sum(nil))
+	// Keep the original extension for content type purposes
+	ext := filepath.Ext(imageURL)
+	if ext == "" {
+		ext = ".jpg" // Default extension if none found
+	}
+	return filepath.Join(imageCacheDir, hash+ext)
+}
+
 func loadSavedKey() string {
 	home, _ := os.UserHomeDir()
 	path := filepath.Join(home, ".config", "news_aggregator_apikey.txt")
@@ -493,7 +528,9 @@ func main() {
 	myWindow := myApp.NewWindow("News on Red:market research tool")
 	myWindow.Resize(fyne.NewSize(1000, 850))
 
+	// Setup configuration directories for bookmarks and image cache
 	setupBookmarksPath()
+	setupImageCacheDir()
 	loadBookmarks()
 	readArticles = make(map[string]bool)
 
@@ -665,6 +702,23 @@ func main() {
 			imgWidget.SetMinSize(fyne.NewSize(120, 80))
 			if article.URLToImage != "" {
 				go func(imgURL string, targetImg *canvas.Image) {
+					// --- Caching Logic Starts ---
+					cachePath := getCachePathForURL(imgURL)
+
+					// 1. Check if the image exists in the cache
+					if _, err := os.Stat(cachePath); err == nil {
+						imgData, err := os.ReadFile(cachePath)
+						if err == nil {
+							imgRes := fyne.NewStaticResource(filepath.Base(imgURL), imgData)
+							targetImg.Resource = imgRes
+							targetImg.Refresh()
+							return // Image loaded from cache, we are done
+						}
+						// If reading failed, proceed to download
+					}
+					// --- Caching Logic Ends ---
+
+					// 2. If not in cache, download it
 					client := http.Client{Timeout: 15 * time.Second}
 					resp, err := client.Get(imgURL)
 					if err != nil {
@@ -674,14 +728,24 @@ func main() {
 					if resp.StatusCode != http.StatusOK {
 						return
 					}
+
 					imgData, err := io.ReadAll(resp.Body)
 					if err != nil {
 						return
 					}
+
+					// 3. Verify it's a valid image before saving and displaying
 					_, _, err = image.Decode(bytes.NewReader(imgData))
 					if err != nil {
 						return
 					}
+
+					// 4. Save the downloaded image to the cache
+					if err := os.WriteFile(cachePath, imgData, 0644); err != nil {
+						fmt.Println("Warning: Failed to write image to cache:", err)
+					}
+
+					// 5. Display the image
 					imgRes := fyne.NewStaticResource(filepath.Base(imgURL), imgData)
 					targetImg.Resource = imgRes
 					targetImg.Refresh()
