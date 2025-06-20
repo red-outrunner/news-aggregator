@@ -32,14 +32,14 @@ import (
 
 // Article struct updated to include URLToImage and SentimentScore
 type Article struct {
-	Title             string `json:"title"`
-	Description       string `json:"description"`
-	URL               string `json:"url"`
-	URLToImage        string `json:"urlToImage"`
-	PublishedAt       string `json:"publishedAt"`
-	ImpactScore       int    `json:"impactScore,omitempty"`
-	PolicyProbability int    `json:"policyProbability,omitempty"`
-	SentimentScore    int    `json:"sentimentScore,omitempty"` // Added for sentiment analysis
+	Title             string   `json:"title"`
+	Description       string   `json:"description"`
+	URL               string   `json:"url"`
+	URLToImage        string   `json:"urlToImage"`
+	PublishedAt       string   `json:"publishedAt"`
+	ImpactScore       int      `json:"impactScore,omitempty"`
+	PolicyProbability int      `json:"policyProbability,omitempty"`
+	SentimentScore    int      `json:"sentimentScore,omitempty"` // Added for sentiment analysis
 	Source            struct { // NewsAPI often nests source info
 		ID   string `json:"id"`
 		Name string `json:"name"`
@@ -54,26 +54,27 @@ type NewsResponse struct {
 }
 
 var (
-	bookmarkedArticles []Article
-	bookmarksMutex     sync.Mutex
-	bookmarksFilePath  string
-	readArticles       map[string]bool
-	readArticlesMutex  sync.Mutex
-
-	// Image cache directory
-	imageCacheDir string // Added for caching
-
-	// Keyword sets for efficient lookup
+	// --- Existing Globals ---
+	bookmarkedArticles  []Article
+	bookmarksMutex      sync.Mutex
+	bookmarksFilePath   string
+	readArticles        map[string]bool
+	readArticlesMutex   sync.Mutex
+	imageCacheDir       string
 	positiveKeywordsSet map[string]struct{}
 	negativeKeywordsSet map[string]struct{}
+	safeFilenameRegex   *regexp.Regexp
 
-	// Regex for sanitizing filenames, pre-compiled for efficiency
-	safeFilenameRegex *regexp.Regexp
+	// --- NEW: Stock Watcher Globals ---
+	watchedStocks     []string
+	watchlistMutex    sync.Mutex
+	watchlistFilePath string
 )
 
 const bookmarksFilename = "news_aggregator_bookmarks.json"
+const watchlistFilename = "news_aggregator_watchlist.json" // New file for watchlist
 
-// Sentiment keywords
+// Sentiment keywords (omitted for brevity, no changes)
 var positiveKeywords = []string{
 	// General Positive
 	"good", "great", "excellent", "positive", "success", "improve", "benefit", "effective", "strong", "happy", "joy", "love", "optimistic", "favorable", "promising", "encouraging",
@@ -103,6 +104,7 @@ var negativeKeywords = []string{
 	"investigation", "lawsuit", "penalty", "fine", "sanction", "ban", "fraud", "scandal", "recall", "dispute", "reject", "denied", "downgrade",
 }
 
+// Impact and Policy keywords (omitted for brevity, no changes)
 var impactScoreKeywords = []string{
 	// General Market Drivers
 	"recession", "inflation", "interest rates", "market crash", "trade war", "supply chain", "corporate earnings", "acquisition", "ipo", "federal reserve", "economic growth", "unemployment", "government stimulus", "new regulation", "geopolitical risk", "tariff", "sanction", "deficit", "surplus", "bankruptcy", "takeover", "merger", "venture capital", "private equity", "stock market", "bond market", "currency fluctuation", "commodity prices", "consumer spending", "housing market", "energy crisis", "financial crisis", "debt ceiling", "quantitative easing", "fiscal policy", "monetary policy", "trade deal", "market sentiment", "volatility", "correction", "bear market", "bull market", "earnings report", "profit warning", "economic forecast", "global economy", "emerging markets",
@@ -112,7 +114,6 @@ var impactScoreKeywords = []string{
 	"sarb", "south african reserve bank", "jse", "johannesburg stock exchange", "rand", "load shedding", "eskom", "mining sector sa", "sa budget", "credit rating south africa", "foreign direct investment sa", "state owned enterprises sa", "bee impact",
 }
 
-// Policy-related keywords for probability calculation
 var policyKeywords = []string{
 	// General & US Focused (many are broadly applicable)
 	"policy", "regulation", "law", "government", "legislation", "bill", "congress", "senate", "parliament", "decree", "treaty", "court", "ruling", "initiative", "mandate", "executive order", "tariff", "sanction", "subsidy", "public policy", "compliance", "enforcement", "oversight", "hearing", "testimony", "budget", "appropriation", "act", "statute", "ordinance", "directive", "guideline", "framework", "accord", "pact", "resolution", "referendum", "lobbying", "advocacy", "think tank", "white paper", "federal", "state", "local government", "agency", "commission", "authority", "irs", "federal reserve", "supreme court", "white house", "capitol hill", "reform", "governance", "judiciary",
@@ -140,14 +141,10 @@ func init() {
 	for _, k := range negativeKeywords {
 		negativeKeywordsSet[strings.ToLower(k)] = struct{}{}
 	}
-	// For impactScoreKeywords and policyKeywords, they contain phrases and use strings.Contains.
-	// The main optimization (ToLower once on text) is already in place for those functions.
-
-	// Pre-compile regex for filename sanitization
 	safeFilenameRegex = regexp.MustCompile(`[^\w-]`)
 }
 
-// --- Utility Functions (Sorting, Time, etc.) ---
+// --- Utility Functions (Sorting, Time, etc. - no changes) ---
 func sortByTime(articles []Article, ascending bool) {
 	sort.Slice(articles, func(i, j int) bool {
 		t1, _ := time.Parse(time.RFC3339, articles[i].PublishedAt)
@@ -159,7 +156,7 @@ func sortByTime(articles []Article, ascending bool) {
 	})
 }
 
-func sortBySentiment(articles []Article, ascending bool) { // ascending true means Low to High
+func sortBySentiment(articles []Article, ascending bool) {
 	sort.Slice(articles, func(i, j int) bool {
 		if ascending {
 			return articles[i].SentimentScore < articles[j].SentimentScore
@@ -252,20 +249,17 @@ func summarizeText(text string) string {
 	return result
 }
 
-// --- Core Logic (Fetch, Sentiment, etc.) ---
+// --- Core Logic (Scoring, etc. - no changes) ---
 func calculateSentimentScore(text string) int {
 	if text == "" {
 		return 0
 	}
 	score := 0
 	textLower := strings.ToLower(text)
-	// Using a simple word splitter. For more complex scenarios, a more robust tokenizer might be needed.
 	words := strings.FieldsFunc(textLower, func(r rune) bool {
-		// Split on anything not a letter or digit
 		return !((r >= 'a' && r <= 'z') || (r >= '0' && r <= '9'))
 	})
 	for _, word := range words {
-		// word is already lowercase due to textLower and splitter behavior
 		if _, found := positiveKeywordsSet[word]; found {
 			score += 10
 		}
@@ -282,13 +276,14 @@ func calculateSentimentScore(text string) int {
 	return score
 }
 
-func fetchNews(apiKey, query, fromDate, toDate string, page int) ([]Article, int, error) {
+// --- UPDATED fetchNews to accept pageSize ---
+func fetchNews(apiKey, query, fromDate, toDate string, page, pageSize int) ([]Article, int, error) {
 	baseApiURL := "https://newsapi.org/v2/everything"
 	queryParams := url.Values{}
 	queryParams.Add("q", query)
 	queryParams.Add("sortBy", "publishedAt")
 	queryParams.Add("language", "en")
-	queryParams.Add("pageSize", "18")
+	queryParams.Add("pageSize", fmt.Sprintf("%d", pageSize)) // Use the passed pageSize
 	queryParams.Add("page", fmt.Sprintf("%d", page))
 	queryParams.Add("apiKey", apiKey)
 
@@ -353,20 +348,18 @@ func fetchNews(apiKey, query, fromDate, toDate string, page int) ([]Article, int
 }
 
 // --- Config & Persistence ---
+// Image cache setup (no changes)
 func setupImageCacheDir() {
 	home, err := os.UserHomeDir()
 	if err != nil {
-		// Fallback to a local directory if home can't be found
 		imageCacheDir = "image_cache"
 		os.MkdirAll(imageCacheDir, 0700)
 		return
 	}
-	// Use the same base config directory as bookmarks for consistency
 	configDir := filepath.Join(home, ".config", "newsaggregator_v3")
 	imageCacheDir = filepath.Join(configDir, "image_cache")
 	if err := os.MkdirAll(imageCacheDir, 0700); err != nil {
 		fmt.Println("Warning: Could not create image cache directory:", err)
-		// Fallback if creation fails
 		imageCacheDir = "image_cache"
 		os.MkdirAll(imageCacheDir, 0700)
 	}
@@ -376,14 +369,14 @@ func getCachePathForURL(imageURL string) string {
 	hasher := sha256.New()
 	hasher.Write([]byte(imageURL))
 	hash := hex.EncodeToString(hasher.Sum(nil))
-	// Keep the original extension for content type purposes
 	ext := filepath.Ext(imageURL)
 	if ext == "" {
-		ext = ".jpg" // Default extension if none found
+		ext = ".jpg"
 	}
 	return filepath.Join(imageCacheDir, hash+ext)
 }
 
+// Key and Theme persistence (no changes)
 func loadSavedKey() string {
 	home, _ := os.UserHomeDir()
 	path := filepath.Join(home, ".config", "news_aggregator_apikey.txt")
@@ -420,6 +413,8 @@ func saveThemePreference(isDark bool) error {
 	}
 	return os.WriteFile(path, []byte(theme), 0600)
 }
+
+// Bookmarks persistence (no changes)
 func setupBookmarksPath() {
 	home, err := os.UserHomeDir()
 	if err != nil {
@@ -479,6 +474,43 @@ func toggleBookmark(article Article) {
 	bookmarksMutex.Unlock()
 	saveBookmarks()
 }
+
+// --- NEW: Watchlist Persistence ---
+func setupWatchlistPath() {
+	home, err := os.UserHomeDir()
+	if err != nil {
+		watchlistFilePath = watchlistFilename
+		return
+	}
+	configDir := filepath.Join(home, ".config", "newsaggregator_v3")
+	if err := os.MkdirAll(configDir, 0700); err != nil {
+		watchlistFilePath = watchlistFilename
+		return
+	}
+	watchlistFilePath = filepath.Join(configDir, watchlistFilename)
+}
+
+func loadWatchlist() {
+	watchlistMutex.Lock()
+	defer watchlistMutex.Unlock()
+	data, err := os.ReadFile(watchlistFilePath)
+	if err != nil {
+		watchedStocks = []string{}
+		return
+	}
+	if err := json.Unmarshal(data, &watchedStocks); err != nil {
+		watchedStocks = []string{}
+	}
+}
+
+func saveWatchlist() {
+	watchlistMutex.Lock()
+	defer watchlistMutex.Unlock()
+	data, _ := json.MarshalIndent(watchedStocks, "", "  ")
+	os.WriteFile(watchlistFilePath, data, 0600)
+}
+
+// Read status and scoring functions (no changes)
 func markAsRead(articleURL string) {
 	readArticlesMutex.Lock()
 	defer readArticlesMutex.Unlock()
@@ -524,14 +556,16 @@ func min(a, b int) int {
 
 // --- Main Application ---
 func main() {
-	myApp := app.NewWithID("com.example.newsaggregator.marketresearch.v2")
+	myApp := app.NewWithID("com.example.newsaggregator.marketresearch.v3")
 	myWindow := myApp.NewWindow("News on Red:market research tool")
 	myWindow.Resize(fyne.NewSize(1000, 850))
 
-	// Setup configuration directories for bookmarks and image cache
+	// Setup ALL configuration directories and load data
 	setupBookmarksPath()
 	setupImageCacheDir()
+	setupWatchlistPath() // New
 	loadBookmarks()
+	loadWatchlist() // New
 	readArticles = make(map[string]bool)
 
 	isDarkTheme := loadThemePreference()
@@ -586,9 +620,9 @@ func main() {
 	queryInput := widget.NewEntry()
 	queryInput.SetPlaceHolder("Search news topics...")
 	fromDateEntry := widget.NewEntry()
-	fromDateEntry.SetPlaceHolder("From: YYYY-MM-DD")
+	fromDateEntry.SetPlaceHolder("From:YYYY-MM-DD")
 	toDateEntry := widget.NewEntry()
-	toDateEntry.SetPlaceHolder("To: YYYY-MM-DD")
+	toDateEntry.SetPlaceHolder("To:YYYY-MM-DD")
 	dateFilterRow := container.NewGridWithColumns(2, container.NewBorder(nil, nil, widget.NewLabel("From:"), nil, fromDateEntry), container.NewBorder(nil, nil, widget.NewLabel("To:"), nil, toDateEntry))
 	results := container.NewVBox()
 	results.Add(widget.NewLabelWithStyle("Enter API key and search query.", fyne.TextAlignCenter, fyne.TextStyle{Italic: true}))
@@ -603,6 +637,7 @@ func main() {
 	var refreshResultsUI func()
 	var showBookmarksView func()
 	var showTrendAnalysisDialog func()
+	var showStockWatcherView func() // Forward declare new function
 
 	// Helper for RichText highlighting
 	createHighlightedText := func(text, query string, highlightRegex *regexp.Regexp) *widget.RichText {
@@ -702,23 +737,16 @@ func main() {
 			imgWidget.SetMinSize(fyne.NewSize(120, 80))
 			if article.URLToImage != "" {
 				go func(imgURL string, targetImg *canvas.Image) {
-					// --- Caching Logic Starts ---
 					cachePath := getCachePathForURL(imgURL)
-
-					// 1. Check if the image exists in the cache
 					if _, err := os.Stat(cachePath); err == nil {
 						imgData, err := os.ReadFile(cachePath)
 						if err == nil {
 							imgRes := fyne.NewStaticResource(filepath.Base(imgURL), imgData)
 							targetImg.Resource = imgRes
 							targetImg.Refresh()
-							return // Image loaded from cache, we are done
+							return
 						}
-						// If reading failed, proceed to download
 					}
-					// --- Caching Logic Ends ---
-
-					// 2. If not in cache, download it
 					client := http.Client{Timeout: 15 * time.Second}
 					resp, err := client.Get(imgURL)
 					if err != nil {
@@ -728,24 +756,17 @@ func main() {
 					if resp.StatusCode != http.StatusOK {
 						return
 					}
-
 					imgData, err := io.ReadAll(resp.Body)
 					if err != nil {
 						return
 					}
-
-					// 3. Verify it's a valid image before saving and displaying
 					_, _, err = image.Decode(bytes.NewReader(imgData))
 					if err != nil {
 						return
 					}
-
-					// 4. Save the downloaded image to the cache
 					if err := os.WriteFile(cachePath, imgData, 0644); err != nil {
 						fmt.Println("Warning: Failed to write image to cache:", err)
 					}
-
-					// 5. Display the image
 					imgRes := fyne.NewStaticResource(filepath.Base(imgURL), imgData)
 					targetImg.Resource = imgRes
 					targetImg.Refresh()
@@ -815,6 +836,7 @@ func main() {
 	}
 
 	showBookmarksView = func() {
+		// This function remains unchanged, omitted for brevity
 		bmWin := myApp.NewWindow("Bookmarked Articles")
 		bmWin.Resize(fyne.NewSize(700, 600))
 		listContent := container.NewVBox()
@@ -856,6 +878,7 @@ func main() {
 	}
 
 	showTrendAnalysisDialog = func() {
+		// This function remains unchanged, omitted for brevity
 		if len(allArticles) == 0 || lastQuery == "" {
 			dialog.ShowInformation("Trend Analysis", "No articles or search query to analyze.", myWindow)
 			return
@@ -909,6 +932,140 @@ func main() {
 		trendWin.Show()
 	}
 
+	// --- NEW: Stock Watcher Window Function ---
+	showStockWatcherView = func() {
+		watcherWin := myApp.NewWindow("Stock Watcher")
+		watcherWin.Resize(fyne.NewSize(600, 500))
+
+		var refreshWatcherList func() // Forward declare for use in closures
+
+		tickerList := container.NewVBox()
+		scrollableList := container.NewVScroll(tickerList)
+
+		newTickerEntry := widget.NewEntry()
+		newTickerEntry.SetPlaceHolder("e.g., AAPL, NPN.JO, VOD.L...")
+
+		addTickerBtn := widget.NewButtonWithIcon("Add", theme.ContentAddIcon(), func() {
+			ticker := strings.ToUpper(strings.TrimSpace(newTickerEntry.Text))
+			if ticker == "" {
+				return
+			}
+
+			// Prevent duplicates
+			watchlistMutex.Lock()
+			found := false
+			for _, t := range watchedStocks {
+				if t == ticker {
+					found = true
+					break
+				}
+			}
+			if !found {
+				watchedStocks = append(watchedStocks, ticker)
+				sort.Strings(watchedStocks) // Keep the list sorted
+			}
+			watchlistMutex.Unlock()
+
+			if !found {
+				saveWatchlist()
+				refreshWatcherList() // Refresh the whole list UI
+				newTickerEntry.SetText("")
+			}
+		})
+		newTickerEntry.OnSubmitted = func(s string) {
+			addTickerBtn.OnTapped()
+		}
+
+		topContent := container.NewBorder(nil, nil, nil, addTickerBtn, newTickerEntry)
+		content := container.NewBorder(topContent, nil, nil, nil, scrollableList)
+
+		refreshWatcherList = func() {
+			tickerList.Objects = nil // Clear the list
+
+			watchlistMutex.Lock()
+			currentWatchlist := make([]string, len(watchedStocks))
+			copy(currentWatchlist, watchedStocks)
+			watchlistMutex.Unlock()
+
+			for _, ticker := range currentWatchlist {
+				tickerForClosure := ticker // Create a stable copy for the goroutine
+				newsContainer := container.NewVBox()
+				loading := widget.NewProgressBarInfinite()
+				newsContainer.Add(loading)
+
+				removeBtn := widget.NewButtonWithIcon("", theme.DeleteIcon(), func() {
+					dialog.ShowConfirm("Remove Stock", fmt.Sprintf("Remove '%s' from watchlist?", tickerForClosure), func(confirm bool) {
+						if confirm {
+							watchlistMutex.Lock()
+							var updatedWatchlist []string
+							for _, t := range watchedStocks {
+								if t != tickerForClosure {
+									updatedWatchlist = append(updatedWatchlist, t)
+								}
+							}
+							watchedStocks = updatedWatchlist
+							watchlistMutex.Unlock()
+							saveWatchlist()
+							refreshWatcherList()
+						}
+					}, watcherWin)
+				})
+				removeBtn.Importance = widget.LowImportance
+
+				header := container.NewBorder(nil, nil,
+					widget.NewLabelWithStyle(tickerForClosure, fyne.TextAlignLeading, fyne.TextStyle{Bold: true}),
+					removeBtn,
+				)
+
+				cardContent := container.NewVBox(header, widget.NewSeparator(), newsContainer)
+				card := widget.NewCard("", "", cardContent)
+				tickerList.Add(card)
+
+				// Fetch news for this specific ticker in the background
+				go func() {
+					apiKey := keyInput.Text
+					if apiKey == "" {
+						newsContainer.Objects = []fyne.CanvasObject{widget.NewLabel("Error: API Key is not set.")}
+						newsContainer.Refresh()
+						return
+					}
+
+					// Use pageSize=2 for efficiency
+					articles, _, err := fetchNews(apiKey, tickerForClosure, "", "", 1, 2)
+					loading.Hide()
+					newsContainer.Objects = nil // Clear loading bar
+
+					if err != nil {
+						newsContainer.Add(widget.NewLabel("Error fetching news: " + err.Error()))
+						newsContainer.Refresh()
+						return
+					}
+
+					if len(articles) == 0 {
+						newsContainer.Add(widget.NewLabel("No recent articles found."))
+					} else {
+						for _, article := range articles {
+							titleLabel := widget.NewLabel(article.Title)
+							titleLabel.Wrapping = fyne.TextWrapWord
+
+							urlLink, _ := url.Parse(article.URL)
+							link := widget.NewHyperlink("Read", urlLink)
+
+							articleRow := container.NewBorder(nil, nil, nil, link, titleLabel)
+							newsContainer.Add(articleRow)
+						}
+					}
+					newsContainer.Refresh()
+				}()
+			}
+			tickerList.Refresh()
+		}
+
+		watcherWin.SetContent(content)
+		watcherWin.Show()
+		refreshWatcherList() // Initial population
+	}
+
 	sortBtn := widget.NewButtonWithIcon("Sort: Time ↓", theme.MenuDropDownIcon(), nil)
 	sortBtn.OnTapped = func() {
 		switch currentSortMode {
@@ -959,7 +1116,8 @@ func main() {
 		lastFromDate = fromDate
 		lastToDate = toDate
 
-		fetchedArticles, total, err := fetchNews(key, query, fromDate, toDate, currentPage)
+		// Use pageSize=18 for main search
+		fetchedArticles, total, err := fetchNews(key, query, fromDate, toDate, currentPage, 18)
 		loadingIndicator.Hide()
 		results.Objects = nil
 		if err != nil {
@@ -1001,6 +1159,7 @@ func main() {
 	searchRow := container.NewBorder(nil, nil, nil, container.NewHBox(searchBtn, sortBtn), queryInput)
 
 	exportBtn := widget.NewButtonWithIcon("Export MD", theme.FileTextIcon(), func() {
+		// This function remains unchanged, omitted for brevity
 		if len(allArticles) == 0 {
 			myApp.SendNotification(&fyne.Notification{Title: "Export Info", Content: "No articles."})
 			return
@@ -1032,6 +1191,7 @@ func main() {
 		myApp.SendNotification(&fyne.Notification{Title: "Export OK", Content: path})
 	})
 	clipboardBtn := widget.NewButtonWithIcon("Copy All", theme.ContentCopyIcon(), func() {
+		// This function remains unchanged, omitted for brevity
 		if len(allArticles) == 0 {
 			myApp.SendNotification(&fyne.Notification{Title: "Clipboard Info", Content: "No articles."})
 			return
@@ -1045,12 +1205,17 @@ func main() {
 		myApp.SendNotification(&fyne.Notification{Title: "Clipboard OK", Content: fmt.Sprintf("%d arts copied.", len(allArticles))})
 	})
 	bookmarksBtn := widget.NewButtonWithIcon("Bookmarks", theme.FolderOpenIcon(), func() { showBookmarksView() })
-	trendBtn := widget.NewButtonWithIcon("Trend", theme.InfoIcon(), func() { showTrendAnalysisDialog() }) // Corrected: theme.InfoIcon()
-	utilityRow := container.NewHBox(layout.NewSpacer(), trendBtn, bookmarksBtn, exportBtn, clipboardBtn, layout.NewSpacer())
+	trendBtn := widget.NewButtonWithIcon("Trend", theme.SettingsIcon(), func() { showTrendAnalysisDialog() })
+
+	// --- NEW Watcher Button added to utilityRow ---
+	watcherBtn := widget.NewButtonWithIcon("Watcher", theme.VisibilityIcon(), func() { showStockWatcherView() })
+	utilityRow := container.NewHBox(layout.NewSpacer(), watcherBtn, trendBtn, bookmarksBtn, exportBtn, clipboardBtn, layout.NewSpacer())
+
 	loadMoreBtn.OnTapped = func() {
 		currentPage++
 		key := keyInput.Text
-		fetchedArticles, _, err := fetchNews(key, lastQuery, lastFromDate, lastToDate, currentPage)
+		// Use pageSize=18 for "Load More"
+		fetchedArticles, _, err := fetchNews(key, lastQuery, lastFromDate, lastToDate, currentPage, 18)
 		if err != nil {
 			myApp.SendNotification(&fyne.Notification{Title: "Load More Error", Content: err.Error()})
 			currentPage--
