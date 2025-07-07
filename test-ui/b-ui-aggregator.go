@@ -1017,6 +1017,10 @@ func main() {
 					removeBtn,
 				)
 
+				// --- Conceptually: Fetch stock data here ---
+				// stockData := fetchStockData(tickerForClosure)
+				// headerContent := container.NewHBox( /* display ticker, price, change, etc. */ )
+
 				cardContent := container.NewVBox(header, widget.NewSeparator(), newsContainer)
 				card := widget.NewCard("", "", cardContent)
 				tickerList.Add(card)
