@@ -21,6 +21,7 @@ type Article struct {
 	Description       string `json:"description"`
 	URL               string `json:"url"`
 	PublishedAt       string `json:"publishedAt"`
+	SentimentScore    int    `json:"sentimentScore,omitempty"`
 }
 
 // NewsAPI
@@ -272,4 +273,34 @@ func min(a, b int) int {
 		return a
 	}
 	return b
+}
+
+var positiveKeywords = []string{
+	// General Positive
+	"good", "great", "excellent", "positive", "success", "improve", "benefit", "effective", "strong", "happy", "joy", "love", "optimistic", "favorable", "promising", "encouraging",
+	// Growth & Expansion
+	"grow", "growth", "expansion", "expand", "increase", "surge", "rise", "upward", "upturn", "boom", "accelerate", "augment", "boost", "rally", "recover", "recovery",
+	// Achievement & Performance
+	"achieve", "achieved", "outperform", "exceed", "beat", "record", "profitable", "profit", "gains", "earnings", "revenue", "dividend", "surplus",
+	// Innovation & Advancement
+	"innovative", "innovation", "breakthrough", "advance", "launch", "new", "develop", "upgrade", "leading", "cutting-edge",
+	// Market Sentiment & Confidence
+	"bullish", "optimism", "confidence", "stable", "stability", "support", "demand", "hot", "high", "robust",
+	// Deals & Approvals
+	"acquire", "acquisition", "merger", "partnership", "agreement", "approve", "approved", "endorse", "confirm",
+}
+
+var negativeKeywords = []string{
+	// General Negative
+	"bad", "poor", "terrible", "negative", "fail", "failure", "weak", "adverse", "sad", "angry", "fear", "pessimistic", "unfavorable", "discouraging",
+	// Decline & Contraction
+	"decline", "decrease", "drop", "fall", "slump", "downturn", "recession", "contraction", "reduce", "cut", "loss", "losses", "deficit", "shrink", "erode", "weaken",
+	// Problems & Risks
+	"crisis", "disaster", "risk", "warn", "warning", "threat", "problem", "issue", "concern", "challenge", "obstacle", "difficulty", "uncertainty", "volatile", "volatility",
+	// Poor Performance
+	"underperform", "miss", "shortfall", "struggle", "stagnate", "delay", "halt",
+	// Market Sentiment & Lack of Confidence
+	"bearish", "pessimism", "doubt", "skepticism", "unstable", "instability", "pressure", "low", "oversupply", "bubble",
+	// Legal & Regulatory Issues
+	"investigation", "lawsuit", "penalty", "fine", "sanction", "ban", "fraud", "scandal", "recall", "dispute", "reject", "denied", "downgrade",
 }
