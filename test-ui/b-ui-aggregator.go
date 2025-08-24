@@ -31,15 +31,18 @@ import (
 	"go.uber.org/zap"
 )
 
-// CustomTheme to override text size
+
 type customTheme struct {
-	fyne.Theme
+	fyne.Theme // Embed the base Theme interface
 }
 
-func (t *customTheme) Size(name string) float32 {
+// Corrected function signature: name is now fyne.ThemeSizeName
+func (t *customTheme) Size(name fyne.ThemeSizeName) float32 {
+	// Compare directly with the fyne.ThemeSizeName constant
 	if name == theme.SizeNameText {
 		return 14 // Set default text size to 14pt
 	}
+	// Pass the fyne.ThemeSizeName to the embedded theme's Size method
 	return t.Theme.Size(name)
 }
 
