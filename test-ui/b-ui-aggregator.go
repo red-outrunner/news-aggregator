@@ -36,13 +36,11 @@ type customTheme struct {
 	fyne.Theme
 }
 
-func (t *customTheme) TextSize(s fyne.TextSize) float32 {
-	switch s {
-	case fyne.TextSizeNormal:
-		return 14 // Set default label size to 14pt
-	default:
-		return t.Theme.TextSize(s)
+func (t *customTheme) Size(name string) float32 {
+	if name == theme.SizeNameText {
+		return 14 // Set default text size to 14pt
 	}
+	return t.Theme.Size(name)
 }
 
 // Article struct (unchanged)
