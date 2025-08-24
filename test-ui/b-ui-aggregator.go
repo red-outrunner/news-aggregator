@@ -31,6 +31,20 @@ import (
 	"go.uber.org/zap"
 )
 
+// CustomTheme to override text size
+type customTheme struct {
+	fyne.Theme
+}
+
+func (t *customTheme) TextSize(s fyne.TextSize) float32 {
+	switch s {
+	case fyne.TextSizeNormal:
+		return 14 // Set default label size to 14pt
+	default:
+		return t.Theme.TextSize(s)
+	}
+}
+
 // Article struct (unchanged)
 type Article struct {
 	Title             string   `json:"title"`
@@ -763,9 +777,9 @@ func (app *AppState) SetupUI(myApp fyne.App) *UIComponents {
 
 	// Theme
 	if app.IsDarkTheme {
-		myApp.Settings().SetTheme(theme.DarkTheme())
+		myApp.Settings().SetTheme(&customTheme{theme.DarkTheme()})
 	} else {
-		myApp.Settings().SetTheme(theme.LightTheme())
+		myApp.Settings().SetTheme(&customTheme{theme.LightTheme()})
 	}
 
 	// UI Components
@@ -787,16 +801,15 @@ func (app *AppState) SetupUI(myApp fyne.App) *UIComponents {
 	themeBtn.OnTapped = func() {
 		app.IsDarkTheme = !app.IsDarkTheme
 		if app.IsDarkTheme {
-			myApp.Settings().SetTheme(theme.DarkTheme())
+			myApp.Settings().SetTheme(&customTheme{theme.DarkTheme()})
 		} else {
-			myApp.Settings().SetTheme(theme.LightTheme())
+			myApp.Settings().SetTheme(&customTheme{theme.LightTheme()})
 		}
 		updateThemeButtonText(app.IsDarkTheme)
 		app.SaveConfig()
 	}
 
 	apiKeyLabel := widget.NewLabelWithStyle("API Key:", fyne.TextAlignLeading, fyne.TextStyle{Monospace: true})
-	apiKeyLabel.TextSize = 14 // Set text size directly
 	apiKeyRow := container.NewBorder(nil, nil, apiKeyLabel, themeBtn, keyInput)
 
 	queryInput := widget.NewEntry()
