@@ -795,8 +795,8 @@ func (app *AppState) SetupUI(myApp fyne.App) *UIComponents {
 		app.SaveConfig()
 	}
 
-	apiKeyLabel := widget.NewLabel("API Key:")
-	apiKeyLabel.TextStyle = fyne.TextStyle{Monospace: true, Size: 14}
+	apiKeyLabel := widget.NewLabelWithStyle("API Key:", fyne.TextAlignLeading, fyne.TextStyle{Monospace: true})
+	apiKeyLabel.TextSize = 14 // Set text size directly
 	apiKeyRow := container.NewBorder(nil, nil, apiKeyLabel, themeBtn, keyInput)
 
 	queryInput := widget.NewEntry()
@@ -831,6 +831,20 @@ func (app *AppState) SetupUI(myApp fyne.App) *UIComponents {
 	trendBtn := widget.NewButtonWithIcon("Trend", theme.SettingsIcon(), nil)
 	watcherBtn := widget.NewButtonWithIcon("Watcher", theme.VisibilityIcon(), nil)
 
+	utilityRow := container.NewHBox(layout.NewSpacer(), watcherBtn, trendBtn, bookmarksBtn, exportBtn, clipboardBtn, layout.NewSpacer())
+	searchRow := container.NewBorder(nil, nil, nil, container.NewHBox(searchBtn, sortBtn), queryInput)
+	topControls := container.NewVBox(
+		sentimentFilter,
+		apiKeyRow,
+		searchRow,
+		dateFilterRow,
+		utilityRow,
+		widget.NewSeparator(),
+	)
+	content := container.NewBorder(topControls, loadMoreContainer, nil, nil, scroll)
+
+	myWindow.SetContent(content)
+
 	return &UIComponents{
 		Window:          myWindow,
 		Results:         scroll,
@@ -864,11 +878,11 @@ func (app *AppState) HandleSearch(ui *UIComponents, myApp fyne.App) {
 		return
 	}
 
-	ui.Results.Content.(*container.VBox).Objects = nil
-	ui.Results.Content.(*container.VBox).Add(ui.LoadMoreBtn)
+	ui.Results.Content.(*fyne.Container).Objects = nil
+	ui.Results.Content.(*fyne.Container).Add(ui.LoadMoreBtn)
 	loadingIndicator := widget.NewProgressBarInfinite()
 	loadingIndicator.Show()
-	ui.Results.Content.(*container.VBox).Add(loadingIndicator)
+	ui.Results.Content.(*fyne.Container).Add(loadingIndicator)
 	ui.Results.Refresh()
 	ui.LoadMoreBtn.Hide()
 	app.CurrentPage = 1
@@ -880,7 +894,7 @@ func (app *AppState) HandleSearch(ui *UIComponents, myApp fyne.App) {
 
 	fetchedArticles, total, err := app.fetchNewsFromProviders(query, fromDate, toDate, app.CurrentPage, 18)
 	loadingIndicator.Hide()
-	ui.Results.Content.(*container.VBox).Objects = nil
+	ui.Results.Content.(*fyne.Container).Objects = nil
 	if err != nil {
 		dialog.ShowError(err, ui.Window)
 		app.Articles = nil
@@ -1033,7 +1047,7 @@ func (app *AppState) HandleClipboard(ui *UIComponents, myApp fyne.App) {
 }
 
 func (app *AppState) RefreshResultsUI(ui *UIComponents) {
-	results := ui.Results.Content.(*container.VBox)
+	results := ui.Results.Content.(*fyne.Container)
 	results.Objects = nil
 	if len(app.Articles) == 0 {
 		if app.LastQuery != "" {
@@ -1473,7 +1487,7 @@ func (app *AppState) ShowStockWatcherView(ui *UIComponents, myApp fyne.App) {
 			})
 			removeBtn.Importance = widget.LowImportance
 
-			var headerContent *container.Box
+			var headerContent *fyne.Container
 			go func() {
 				stockData, err := fetchStockData(tickerForClosure)
 				if err != nil {
@@ -1604,10 +1618,5 @@ func main() {
 	ui.FromDateEntry.OnSubmitted = func(s string) { appState.HandleSearch(ui, myApp) }
 	ui.ToDateEntry.OnSubmitted = func(s string) { appState.HandleSearch(ui, myApp) }
 
-	utilityRow := container.NewHBox(layout.NewSpacer(), ui.WatcherBtn, ui.TrendBtn, ui.BookmarksBtn, ui.ExportBtn, ui.ClipboardBtn, layout.NewSpacer())
-	searchRow := container.NewBorder(nil, nil, nil, container.NewHBox(ui.SearchBtn, ui.SortBtn), ui.QueryInput)
-	topControls := container.NewVBox(ui.SentimentFilter, ui.KeyInput, searchRow, dateFilterRow, utilityRow, widget.NewSeparator())
-	content := container.NewBorder(topControls, ui.LoadMoreBtn, nil, nil, ui.Results)
-	ui.Window.SetContent(content)
 	ui.Window.ShowAndRun()
 }
