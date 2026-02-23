@@ -42,7 +42,8 @@ async function fetchStockDataAlphaVantage(symbol: string): Promise<StockData | n
 
     const price = parseFloat(quote['05. price']) || 0;
     const change = parseFloat(quote['09. change']) || 0;
-    const changePercent = parseFloat(quote['10. change percent'])?.replace('%', '') || 0;
+    const changePercentStr = quote['10. change percent']?.toString() || '';
+    const changePercent = parseFloat(changePercentStr.replace('%', '')) || 0;
     const previousClose = parseFloat(quote['08. previous close']) || 0;
     const dayHigh = parseFloat(quote['03. high']) || price;
     const dayLow = parseFloat(quote['04. low']) || price;
