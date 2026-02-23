@@ -45,23 +45,52 @@ export default function Sidebar({ trendingTopics, onTopicClick }: SidebarProps) 
         </div>
       </div>
 
-      {/* Market Summary */}
-      <div className="bg-gradient-to-br from-blue-600 to-blue-700 rounded-lg shadow-sm p-4 text-white">
+      {/* Global Markets Summary */}
+      <div className="bg-gradient-to-br from-blue-600 to-purple-700 rounded-lg shadow-sm p-4 text-white">
         <div className="flex items-center gap-2 mb-3">
           <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-            <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M9 19v-6a2 2 0 00-2-2H5a2 2 0 00-2 2v6a2 2 0 002 2h2a2 2 0 002-2zm0 0V9a2 2 0 012-2h2a2 2 0 012 2v10m-6 0a2 2 0 002 2h2a2 2 0 002-2m0 0V5a2 2 0 012-2h2a2 2 0 012 2v14a2 2 0 01-2 2h-2a2 2 0 01-2-2z" />
+            <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M3.055 11H5a2 2 0 012 2v1a2 2 0 002 2 2 2 0 012 2v2.945M8 3.935V5.5A2.5 2.5 0 0010.5 8h.5a2 2 0 012 2 2 2 0 104 0 2 2 0 012-2h1.064M15 20.488V18a2 2 0 012-2h3.064M21 12a9 9 0 11-18 0 9 9 0 0118 0z" />
           </svg>
-          <h3 className="text-lg font-bold">Market Summary</h3>
+          <h3 className="text-lg font-bold">Global Markets</h3>
         </div>
-        <p className="text-sm text-blue-100 mb-3">
-          Track stocks and indices mentioned in your news articles
-        </p>
-        <div className="text-xs text-blue-200">
-          Stock data updates automatically when articles mention tickers
+        <div className="space-y-2 text-sm">
+          <div className="flex justify-between items-center">
+            <span className="text-blue-100">🇺🇸 US (NYSE/NASDAQ)</span>
+            <span className="text-xs text-blue-200">Open 9:30 AM EST</span>
+          </div>
+          <div className="flex justify-between items-center">
+            <span className="text-blue-100">🇬🇧 UK (LSE)</span>
+            <span className="text-xs text-blue-200">Open 8:00 AM GMT</span>
+          </div>
+          <div className="flex justify-between items-center">
+            <span className="text-blue-100">🇪🇺 EU (XETRA/Euronext)</span>
+            <span className="text-xs text-blue-200">Open 9:00 AM CET</span>
+          </div>
+          <div className="flex justify-between items-center">
+            <span className="text-blue-100">🇿🇦 SA (JSE)</span>
+            <span className="text-xs text-blue-200">Open 9:00 AM SAST</span>
+          </div>
+          <div className="flex justify-between items-center">
+            <span className="text-blue-100">🇦🇺 AU (ASX)</span>
+            <span className="text-xs text-blue-200">Open 10:00 AM AEST</span>
+          </div>
+          <div className="flex justify-between items-center">
+            <span className="text-blue-100">🇭🇰 HK (HKEX)</span>
+            <span className="text-xs text-blue-200">Open 9:30 AM HKT</span>
+          </div>
+          <div className="flex justify-between items-center">
+            <span className="text-blue-100">🇯🇵 JP (TSE)</span>
+            <span className="text-xs text-blue-200">Open 9:00 AM JST</span>
+          </div>
+        </div>
+        <div className="mt-3 pt-3 border-t border-white/20">
+          <p className="text-xs text-blue-100">
+            Stock data updates automatically when articles mention tickers
+          </p>
         </div>
       </div>
 
-      {/* Quick Stats */}
+      {/* Analysis Stats */}
       <div className="bg-white dark:bg-gray-800 rounded-lg shadow-sm border border-gray-200 dark:border-gray-700 p-4">
         <h3 className="text-sm font-bold text-gray-900 dark:text-gray-100 mb-3">
           Analysis Stats
@@ -78,6 +107,12 @@ export default function Sidebar({ trendingTopics, onTopicClick }: SidebarProps) 
           <div className="flex justify-between items-center">
             <span className="text-xs text-gray-500 dark:text-gray-400">Policy Range</span>
             <span className="text-xs font-medium text-gray-700 dark:text-gray-300">0% to 100%</span>
+          </div>
+          <div className="pt-2 border-t border-gray-200 dark:border-gray-700">
+            <div className="flex justify-between items-center">
+              <span className="text-xs text-gray-500 dark:text-gray-400">Markets Tracked</span>
+              <span className="text-xs font-medium text-blue-600 dark:text-blue-400">8 Regions</span>
+            </div>
           </div>
         </div>
       </div>
