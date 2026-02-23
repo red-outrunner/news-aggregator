@@ -1,4 +1,4 @@
-// Migrated from Go impact score algorithm
+// Enhanced impact score algorithm with word boundary regex
 // Original: calculateImpactScore() in main.go and ui-aggregator.go
 
 // Impactful words that indicate importance
@@ -12,7 +12,15 @@ const impactfulWords = [
 ];
 
 /**
- * Calculates impact score based on important words
+ * Creates a regex pattern with word boundaries for exact word matching
+ */
+function createWordBoundaryPattern(word: string): RegExp {
+  const escaped = word.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+  return new RegExp(`\\b${escaped}\\b`, 'gi');
+}
+
+/**
+ * Calculates impact score based on important words with word boundary matching
  * @param text - The text to analyze
  * @returns Score from 0 to 100
  */
@@ -21,23 +29,13 @@ export function calculateImpactScore(text: string): number {
   const textLower = text.toLowerCase();
 
   for (const word of impactfulWords) {
-    const count = countOccurrences(textLower, word);
-    score += count * 5;
+    const pattern = createWordBoundaryPattern(word);
+    const matches = textLower.match(pattern);
+    if (matches) {
+      score += matches.length * 5;
+    }
   }
 
   // Cap the score
   return Math.min(100, score);
-}
-
-/**
- * Counts occurrences of a substring in a string
- */
-function countOccurrences(str: string, substr: string): number {
-  let count = 0;
-  let pos = 0;
-  while ((pos = str.indexOf(substr, pos)) !== -1) {
-    count++;
-    pos += substr.length;
-  }
-  return count;
 }

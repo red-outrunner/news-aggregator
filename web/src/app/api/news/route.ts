@@ -75,7 +75,7 @@ export async function GET(request: NextRequest) {
     const articlesWithScores = data.articles.map((article: any) => {
       const content = `${article.title} ${article.description}`;
       
-      // Sentiment analysis
+      // === ENHANCED SENTIMENT ANALYSIS with Negation Detection ===
       let sentimentScore = 0;
       const textLower = content.toLowerCase();
       
@@ -90,7 +90,7 @@ export async function GET(request: NextRequest) {
         "underperforms market", "negative outlook", "bleak forecast", "steep decline",
         "poor performance", "significant losses", "sharp drop", "market crash",
       ];
-      
+
       const positiveKeywords = new Set([
         "good", "great", "excellent", "positive", "success", "improve", "benefit", "effective", "strong", "happy", "joy", "love", "optimistic", "favorable", "promising", "encouraging",
         "grow", "growth", "expansion", "expand", "increase", "surge", "rise", "upward", "upturn", "boom", "accelerate", "augment", "boost", "rally", "recover", "recovery",
@@ -109,27 +109,72 @@ export async function GET(request: NextRequest) {
         "investigation", "lawsuit", "penalty", "fine", "sanction", "ban", "fraud", "scandal", "recall", "dispute", "reject", "denied", "downgrade",
       ]);
 
-      // Check phrases
+      const negationWords = [
+        "not", "no", "never", "neither", "nobody", "nothing", "nowhere",
+        "lack", "lacking", "lacks", "lacked",
+        "without", "hardly", "barely", "scarcely",
+        "fail", "failed", "fails", "failing",
+        "unlikely", "impossible", "cannot", "can't", "won't", "wouldn't", "couldn't", "shouldn't",
+      ];
+      const NEGATION_WINDOW = 3;
+
+      // Helper: check if word at index is negated
+      const isNegated = (words: string[], idx: number): boolean => {
+        const start = Math.max(0, idx - NEGATION_WINDOW);
+        for (let i = start; i < idx; i++) {
+          if (negationWords.includes(words[i])) return true;
+        }
+        return false;
+      };
+
+      // Helper: create regex with word boundaries
+      const createPattern = (phrase: string) => {
+        const escaped = phrase.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+        return new RegExp(`\\b${escaped}\\b`, 'gi');
+      };
+
+      // Check positive phrases with word boundaries and negation
       for (const phrase of positivePhrases) {
-        const count = (textLower.match(new RegExp(phrase, 'g')) || []).length;
-        sentimentScore += count * 15;
-      }
-      for (const phrase of negativePhrases) {
-        const count = (textLower.match(new RegExp(phrase, 'g')) || []).length;
-        sentimentScore -= count * 15;
+        const pattern = createPattern(phrase);
+        const matches = textLower.match(pattern);
+        if (matches) {
+          const phraseIdx = textLower.indexOf(phrase);
+          const wordsBefore = textLower.slice(0, phraseIdx).split(/\s+/).filter(w => w.length > 0);
+          const recentWords = wordsBefore.slice(-NEGATION_WINDOW);
+          const isPhraseNegated = recentWords.some(w => negationWords.includes(w));
+          sentimentScore += matches.length * 15 * (isPhraseNegated ? -1 : 1);
+        }
       }
 
-      // Check words
+      // Check negative phrases with word boundaries and negation
+      for (const phrase of negativePhrases) {
+        const pattern = createPattern(phrase);
+        const matches = textLower.match(pattern);
+        if (matches) {
+          const phraseIdx = textLower.indexOf(phrase);
+          const wordsBefore = textLower.slice(0, phraseIdx).split(/\s+/).filter(w => w.length > 0);
+          const recentWords = wordsBefore.slice(-NEGATION_WINDOW);
+          const isPhraseNegated = recentWords.some(w => negationWords.includes(w));
+          sentimentScore -= matches.length * 15 * (isPhraseNegated ? -1 : 1);
+        }
+      }
+
+      // Check individual words with negation detection
       const words = textLower.split(/[^a-z0-9]+/).filter(w => w.length > 0);
-      for (const word of words) {
-        if (positiveKeywords.has(word)) sentimentScore += 10;
-        if (negativeKeywords.has(word)) sentimentScore -= 10;
+      for (let i = 0; i < words.length; i++) {
+        const negated = isNegated(words, i);
+        if (positiveKeywords.has(words[i])) {
+          sentimentScore += 10 * (negated ? -1 : 1);
+        }
+        if (negativeKeywords.has(words[i])) {
+          sentimentScore -= 10 * (negated ? -1 : 1);
+        }
       }
 
       // Cap sentiment score
       sentimentScore = Math.max(-100, Math.min(100, sentimentScore));
 
-      // Impact score
+      // Impact score with word boundaries (uses createPattern from above)
       const impactfulWords = [
         "major", "significant", "important", "critical", "breaking", "urgent",
         "massive", "huge", "substantial", "considerable", "remarkable",
@@ -137,25 +182,31 @@ export async function GET(request: NextRequest) {
         "crisis", "breakthrough", "disaster", "economy", "war", "pandemic",
         "reform", "global", "election", "protest", "conflict", "threat",
       ];
-      
+
       let impactScore = 0;
       for (const word of impactfulWords) {
-        const count = (textLower.match(new RegExp(word, 'g')) || []).length;
-        impactScore += count * 5;
+        const pattern = createPattern(word);
+        const matches = textLower.match(pattern);
+        if (matches) {
+          impactScore += matches.length * 5;
+        }
       }
       impactScore = Math.min(100, impactScore);
 
-      // Policy probability
+      // Policy probability with word boundaries (uses createPattern from above)
       const policyKeywords = [
         "policy", "regulation", "law", "government", "legislation", "bill",
         "congress", "senate", "parliament", "decree", "treaty", "court",
         "ruling", "initiative",
       ];
-      
+
       let policyProbability = 0;
       for (const word of policyKeywords) {
-        const count = (textLower.match(new RegExp(word, 'g')) || []).length;
-        policyProbability += count * 10;
+        const pattern = createPattern(word);
+        const matches = textLower.match(pattern);
+        if (matches) {
+          policyProbability += matches.length * 10;
+        }
       }
       policyProbability = Math.min(100, policyProbability);
 
