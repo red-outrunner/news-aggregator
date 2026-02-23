@@ -78,11 +78,11 @@ export default function ArticleCard({
             {/* Bookmark Button */}
             <button
               onClick={() => onToggleBookmark(article)}
-              className={`p-2 rounded-lg transition-colors duration-200
-                        ${isBookmarked 
-                          ? 'bg-blue-100 dark:bg-blue-900 text-blue-600 dark:text-blue-400' 
-                          : 'bg-gray-100 dark:bg-gray-700 text-gray-600 dark:text-gray-400 
-                             hover:bg-gray-200 dark:hover:bg-gray-600'}`}
+              className={`p-2 rounded-lg transition-colors duration-200 ${
+                isBookmarked
+                  ? 'bg-blue-100 dark:bg-blue-900 text-blue-600 dark:text-blue-400'
+                  : 'bg-gray-100 dark:bg-gray-700 text-gray-600 dark:text-gray-400 hover:bg-gray-200 dark:hover:bg-gray-600'
+              }`}
               title={isBookmarked ? 'Remove bookmark' : 'Add bookmark'}
             >
               {isBookmarked ? (
