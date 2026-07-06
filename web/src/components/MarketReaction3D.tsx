@@ -1,6 +1,7 @@
 'use client';
 
 import { useCallback, useEffect, useRef, useState } from 'react';
+import { createPortal } from 'react-dom';
 import * as THREE from 'three';
 import { StockMention } from '@/lib/stockExtractor';
 import { useNewsStore } from '@/store/newsStore';
@@ -451,7 +452,10 @@ export default function MarketReaction3D({
   const drawable = histories?.filter((h) => h.points.length >= 2 && h.publishPrice) ?? [];
   const publishDate = new Date(publishedAt);
 
-  return (
+  // Portal to <body>: the article card has hover transforms, and a transformed
+  // ancestor becomes the containing block for position:fixed — which would
+  // trap and clip the modal inside the card
+  return createPortal(
     <div className="fixed inset-0 z-50 overflow-y-auto">
       {/* Backdrop */}
       <div className="fixed inset-0 bg-black/50 backdrop-blur-sm transition-opacity" onClick={onClose} />
@@ -625,6 +629,7 @@ export default function MarketReaction3D({
           </div>
         </div>
       </div>
-    </div>
+    </div>,
+    document.body
   );
 }
