@@ -1,8 +1,13 @@
 'use client';
 
+import { useState } from 'react';
+import dynamic from 'next/dynamic';
 import { Article } from '@/lib/types';
 import { humanTime } from '@/lib/utils';
 import { StockMention } from '@/lib/stockExtractor';
+
+// three.js only loads when a reaction chart is first opened
+const MarketReaction3D = dynamic(() => import('./MarketReaction3D'), { ssr: false });
 
 interface ArticleCardProps {
   article: Article;
@@ -11,12 +16,14 @@ interface ArticleCardProps {
   stockMentions: StockMention[];
 }
 
-export default function ArticleCard({ 
-  article, 
-  isBookmarked, 
+export default function ArticleCard({
+  article,
+  isBookmarked,
   onToggleBookmark,
-  stockMentions 
+  stockMentions
 }: ArticleCardProps) {
+  const [showReaction, setShowReaction] = useState(false);
+  const chartableMentions = stockMentions.filter((m) => m.type === 'stock' || m.type === 'etf');
   const sentimentColor = 
     (article.sentimentScore || 0) > 0 ? 'text-green-600 dark:text-green-400' :
     (article.sentimentScore || 0) < 0 ? 'text-red-600 dark:text-red-400' :
@@ -122,17 +129,31 @@ export default function ArticleCard({
                   Stocks Mentioned
                 </span>
               </div>
-              <div className="flex flex-wrap gap-2">
+              <div className="flex flex-wrap items-center gap-2">
                 {stockMentions.map((stock) => (
                   <span
                     key={stock.symbol}
-                    className="inline-flex items-center gap-1 bg-gray-100 dark:bg-gray-700 
+                    className="inline-flex items-center gap-1 bg-gray-100 dark:bg-gray-700
                                text-gray-700 dark:text-gray-300 text-xs font-medium px-2 py-1 rounded"
                   >
                     <span className="font-bold">{stock.symbol}</span>
                     <span className="text-gray-500 dark:text-gray-400 text-xs">{stock.type}</span>
                   </span>
                 ))}
+                {chartableMentions.length > 0 && (
+                  <button
+                    onClick={() => setShowReaction(true)}
+                    className="inline-flex items-center gap-1.5 text-xs font-semibold px-2.5 py-1 rounded
+                               bg-blue-600 hover:bg-blue-700 text-white transition-colors duration-200"
+                    title="Interactive 3D chart of how these stocks moved in the 24h after this article"
+                  >
+                    <svg className="w-3.5 h-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                      <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2}
+                        d="M20 7l-8-4-8 4m16 0l-8 4m8-4v10l-8 4m0-10L4 7m8 4v10M4 7v10l8 4" />
+                    </svg>
+                    24h Reaction
+                  </button>
+                )}
               </div>
             </div>
           )}
@@ -159,6 +180,17 @@ export default function ArticleCard({
           </div>
         </div>
       </div>
+
+      {/* 24h market reaction chart (mounted on open) */}
+      {showReaction && (
+        <MarketReaction3D
+          isOpen={showReaction}
+          onClose={() => setShowReaction(false)}
+          articleTitle={article.title}
+          publishedAt={article.publishedAt}
+          mentions={chartableMentions}
+        />
+      )}
     </article>
   );
 }

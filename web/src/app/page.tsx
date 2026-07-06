@@ -12,7 +12,7 @@ import {
   Sidebar,
   ApiKeyModal
 } from '@/components';
-import { extractStocksFromArticles, StockMention } from '@/lib/stockExtractor';
+import { extractStocksFromArticles, expandTickerQuery, StockMention, TickerExpansion } from '@/lib/stockExtractor';
 import { Article } from '@/lib/types';
 
 export default function Home() {
@@ -40,6 +40,7 @@ export default function Home() {
 
   const [showBookmarks, setShowBookmarks] = useState(false);
   const [showApiKeys, setShowApiKeys] = useState(false);
+  const [tickerExpansion, setTickerExpansion] = useState<TickerExpansion | null>(null);
   const [stockMentionsMap, setStockMentionsMap] = useState<Map<string, StockMention[]>>(new Map());
   const [allStockMentions, setAllStockMentions] = useState<StockMention[]>([]);
 
@@ -98,8 +99,13 @@ export default function Home() {
     setLoading(true);
     setError(null);
 
+    // If the query is a stock ticker, widen the search to the company name too
+    const expansion = expandTickerQuery(searchQuery);
+    setTickerExpansion(expansion);
+    const apiQuery = expansion ? expansion.expandedQuery : searchQuery;
+
     try {
-      const response = await fetch(`/api/news?q=${encodeURIComponent(searchQuery)}`, {
+      const response = await fetch(`/api/news?q=${encodeURIComponent(apiQuery)}`, {
         headers: newsApiKey ? { 'X-News-Api-Key': newsApiKey } : undefined,
       });
       const data = await response.json();
@@ -176,6 +182,17 @@ export default function Home() {
             {/* Search */}
             <div className="bg-white dark:bg-gray-800 rounded-lg shadow-sm border border-gray-200 dark:border-gray-700 p-4">
               <SearchBar onSearch={handleSearch} isLoading={isLoading} />
+              {tickerExpansion && !error && (
+                <p className="mt-2 text-xs text-gray-500 dark:text-gray-400 flex items-center gap-1.5">
+                  <svg className="w-3.5 h-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M13 7h8m0 0v8m0-8l-8 8-4-4-6 6" />
+                  </svg>
+                  Ticker detected — also searching{' '}
+                  <span className="font-semibold text-gray-700 dark:text-gray-300">
+                    {tickerExpansion.company} ({tickerExpansion.symbol})
+                  </span>
+                </p>
+              )}
             </div>
 
             {/* Error Message */}

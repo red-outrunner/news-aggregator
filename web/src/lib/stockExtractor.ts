@@ -304,11 +304,51 @@ const companyToTicker: Record<string, string> = {
   'Chanel': 'CHANEL', 'Cartier': 'CFR',
 };
 
+// Reverse map: ticker -> company name (first name listed for a ticker wins)
+const tickerToCompany: Record<string, string> = {};
+for (const [company, ticker] of Object.entries(companyToTicker)) {
+  if (!tickerToCompany[ticker]) {
+    tickerToCompany[ticker] = company;
+  }
+}
+
 export interface StockMention {
   symbol: string;
   name: string;
   type: 'stock' | 'index' | 'etf';
   context: string;
+}
+
+export interface TickerExpansion {
+  symbol: string;
+  company: string;
+  /** Query to send to the news API: matches the company name or the raw ticker */
+  expandedQuery: string;
+}
+
+/**
+ * If the whole search query is a known stock ticker, expand it to also search
+ * the company name (e.g. "TSLA" -> Tesla). Returns null for anything that
+ * isn't a ticker, so non-stock topics are never rewritten.
+ * One- and two-letter tickers (T, BP, MS...) collide with ordinary words, so
+ * they only expand when typed in uppercase.
+ */
+export function expandTickerQuery(query: string): TickerExpansion | null {
+  const trimmed = query.trim();
+  if (!/^[A-Za-z0-9.]{1,6}$/.test(trimmed)) return null;
+
+  const symbol = trimmed.toUpperCase();
+  if (!knownTickers.has(symbol)) return null;
+  if (symbol.length <= 2 && trimmed !== symbol) return null;
+
+  const company = tickerToCompany[symbol];
+  if (!company) return null;
+
+  return {
+    symbol,
+    company,
+    expandedQuery: `"${company}" OR ${symbol}`,
+  };
 }
 
 /**

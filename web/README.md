@@ -5,6 +5,8 @@ A modern web-based news aggregator with sentiment analysis, impact scoring, and 
 ## Features
 
 - **Search & Fetch**: Search NewsAPI for articles on any topic
+- **Ticker Search**: Type a stock ticker (TSLA, NPN, 0700...) and the search automatically widens to the company name — plain topics are left untouched
+- **24h Market Reaction**: Articles that mention stocks get an interactive 3D chart (three.js) showing how each stock moved in the 24 hours after publication, with hover details and a table view
 - **Sentiment Analysis**: Automatically scores articles from -100 (negative) to +100 (positive)
 - **Impact Scoring**: Measures article importance based on impactful keywords
 - **Policy Probability**: Calculates policy relevance percentage
