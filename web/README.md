@@ -41,7 +41,11 @@ cd web
 npm install
 ```
 
-3. Create environment file and add your API key:
+3. Add your NewsAPI key — either way works:
+
+**In the site (easiest):** run the app, click the key button in the header, and paste your key. It's stored in your browser's localStorage and takes priority over the server key.
+
+**Or in an env file** (acts as the default for all visitors):
 ```bash
 cp .env.local.example .env.local
 ```
@@ -81,6 +85,7 @@ web/
 │   │   ├── ThemeToggle.tsx       # Dark/light mode toggle
 │   │   ├── StockTicker.tsx       # Global markets ticker bar
 │   │   ├── Sidebar.tsx           # Trending topics sidebar
+│   │   ├── ApiKeyModal.tsx       # Bring-your-own API key settings
 │   │   └── index.ts              # Component exports
 │   ├── lib/
 │   │   ├── analysis/

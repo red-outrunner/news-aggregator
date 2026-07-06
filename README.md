@@ -7,10 +7,12 @@ craeted by Weo Sikho Fuzile
 This joint hits the NewsAPI to fetch the latest articles based on whatever you're curious about. Type in anything - "Tesla", "crypto", "climate change", whatever you're trying to stay up on - and it'll serve up the 18 most recent stories, sorted fresh to old.
 
 ## Structure
-Main folder is cli based version - way behind in updates
-> `test-ui/` for ui version
-> - the `ui-aggregator.go` is for main tested version I recommend that build for stable type
-> - the `b-ui-aggregator.go` is for the new feature I am tryin like the workaround ollama
+The old Go CLI is retired - the whole app lives in the Next.js web version now
+> `web/` - the app
+> - `web/src/app/` - pages + API routes (NewsAPI proxy, stock quotes)
+> - `web/src/components/` - UI pieces (article cards, stock ticker, sidebar, etc.)
+> - `web/src/lib/` - the brains (sentiment/impact/policy scoring in `lib/analysis/`, stock ticker extraction)
+> - `web/src/store/` - state management (bookmarks, theme, sorting)
 
 ## Features
 * **Search & Filter**
@@ -38,25 +40,27 @@ Main folder is cli based version - way behind in updates
 ## 1. Before You Even Start
 
 Look, this whole thing runs on NewsAPI, so you need a key - non-negotiable. Head to [NewsAPI](https://newsapi.org/register) and get yours (it's free, don't trip). Without this, you might as well try to run a car with no gas.
-Have Ollama installed for ai summary - the only memory demanding task
+You can paste your key straight into the site - hit the key button in the header, done. No env file needed.
+Optional: an [Alpha Vantage](https://www.alphavantage.co/support/#api-key) key for stock quotes - without it the ticker falls back to Yahoo Finance.
 
 ## 2. Setup
 
-1. First things first, cop Go from [golang.org](https://golang.org/dl/) if you ain't got it
+1. First things first, cop Node.js 18+ from [nodejs.org](https://nodejs.org) if you ain't got it
 2. Clone this repo (you know the vibes):
 ```bash
 git clone https://github.com/your-username/news-aggregator.git
-cd news-aggregator
+cd news-aggregator/web
 ```
 ## Running It
 
 Just hit it with:
 ```bash
-go run main.go
+npm install
+cp .env.local.example .env.local   # drop your NewsAPI key in here
+npm run dev
 ```
-Insert your API key
 
-Then type whatever you're trying to read about when it asks. Simple as that.
+Then open http://localhost:3000 and search whatever you're trying to read about. Simple as that.
 
 ## Pro Tips
 
@@ -75,7 +79,7 @@ Built with Go, powered by NewsAPI, and zero bloat. Drop an issue in the repo.
 ## GUI mode changes coming soon bro's
 
 to make it mire fresh and seamless like Thanos glove:
-1. entering API key on Gui Mode also on console mode
+1. entering API key on Gui Mode also on console mode - Done on web (key button in the header)
 2. add up sort function on the console - Done
 3. get access to more news site where reading articles cost $free.99c - on pipeline
 4. make the thing a bit pretty - semi-done

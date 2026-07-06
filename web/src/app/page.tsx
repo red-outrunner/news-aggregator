@@ -2,14 +2,15 @@
 
 import { useState, useEffect, useMemo } from 'react';
 import { useNewsStore } from '@/store/newsStore';
-import { 
-  SearchBar, 
-  ArticleList, 
-  SortFilter, 
-  BookmarksModal, 
+import {
+  SearchBar,
+  ArticleList,
+  SortFilter,
+  BookmarksModal,
   ThemeToggle,
   StockTicker,
-  Sidebar
+  Sidebar,
+  ApiKeyModal
 } from '@/components';
 import { extractStocksFromArticles, StockMention } from '@/lib/stockExtractor';
 import { Article } from '@/lib/types';
@@ -23,6 +24,8 @@ export default function Home() {
     error,
     bookmarks,
     isDarkMode,
+    newsApiKey,
+    alphaVantageKey,
     sortBy,
     setArticles,
     setLoading,
@@ -30,11 +33,13 @@ export default function Home() {
     toggleBookmark,
     isBookmarked,
     toggleTheme,
+    setApiKeys,
     setSortBy,
     getSortedArticles,
   } = useNewsStore();
 
   const [showBookmarks, setShowBookmarks] = useState(false);
+  const [showApiKeys, setShowApiKeys] = useState(false);
   const [stockMentionsMap, setStockMentionsMap] = useState<Map<string, StockMention[]>>(new Map());
   const [allStockMentions, setAllStockMentions] = useState<StockMention[]>([]);
 
@@ -94,7 +99,9 @@ export default function Home() {
     setError(null);
 
     try {
-      const response = await fetch(`/api/news?q=${encodeURIComponent(searchQuery)}`);
+      const response = await fetch(`/api/news?q=${encodeURIComponent(searchQuery)}`, {
+        headers: newsApiKey ? { 'X-News-Api-Key': newsApiKey } : undefined,
+      });
       const data = await response.json();
 
       if (!response.ok) {
@@ -138,6 +145,20 @@ export default function Home() {
 
             {/* Right side */}
             <div className="flex items-center gap-4">
+              <button
+                onClick={() => setShowApiKeys(true)}
+                className="relative p-2 rounded-lg bg-gray-100 dark:bg-gray-700
+                           hover:bg-gray-200 dark:hover:bg-gray-600
+                           transition-colors duration-200"
+                title={newsApiKey ? 'API keys (your key is active)' : 'Add your API keys'}
+              >
+                <svg className="w-5 h-5 text-gray-700 dark:text-gray-300" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                  <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M15 7a2 2 0 012 2m4 0a6 6 0 01-7.743 5.743L11 17H9v2H7v2H4a1 1 0 01-1-1v-2.586a1 1 0 01.293-.707l5.964-5.964A6 6 0 1121 9z" />
+                </svg>
+                {newsApiKey && (
+                  <span className="absolute top-1 right-1 w-2 h-2 bg-green-500 rounded-full" />
+                )}
+              </button>
               <ThemeToggle isDarkMode={isDarkMode} onToggle={toggleTheme} />
             </div>
           </div>
@@ -213,6 +234,17 @@ export default function Home() {
         isBookmarked={isBookmarked}
         onToggleBookmark={toggleBookmark}
       />
+
+      {/* API Keys Modal (mounted on open so inputs pick up saved keys) */}
+      {showApiKeys && (
+        <ApiKeyModal
+          isOpen={showApiKeys}
+          onClose={() => setShowApiKeys(false)}
+          newsApiKey={newsApiKey}
+          alphaVantageKey={alphaVantageKey}
+          onSave={setApiKeys}
+        />
+      )}
     </div>
   );
 }

@@ -5,9 +5,8 @@ import { Article } from '@/lib/types';
 export async function GET(request: NextRequest) {
   const searchParams = request.nextUrl.searchParams;
   const query = searchParams.get('q');
-  const apiKey = process.env.NEWS_API_KEY;
-
-  console.log('API Request - Query:', query, 'Has API Key:', !!apiKey);
+  // User-supplied key (from site settings) takes priority over the server's key
+  const apiKey = request.headers.get('x-news-api-key') || process.env.NEWS_API_KEY;
 
   if (!query) {
     return NextResponse.json(
@@ -17,13 +16,12 @@ export async function GET(request: NextRequest) {
   }
 
   if (!apiKey) {
-    console.error('NEWS_API_KEY is not set in environment variables');
     return NextResponse.json(
-      { 
-        error: 'Missing NEWS_API_KEY', 
-        message: 'Please add your NewsAPI key to the .env.local file. See .env.local.example for format.' 
+      {
+        error: 'Missing NewsAPI key',
+        message: 'Add your NewsAPI key via the key button in the header (free at newsapi.org/register), or set NEWS_API_KEY in .env.local.',
       },
-      { status: 500 }
+      { status: 401 }
     );
   }
 

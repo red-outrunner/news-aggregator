@@ -16,6 +16,10 @@ interface NewsState {
   // Theme (persisted)
   isDarkMode: boolean;
 
+  // User-supplied API keys (persisted, stored only in this browser)
+  newsApiKey: string;
+  alphaVantageKey: string;
+
   // Sorting
   sortBy: 'latest' | 'oldest' | 'sentiment' | 'impact';
 
@@ -31,7 +35,10 @@ interface NewsState {
   
   // Theme
   toggleTheme: () => void;
-  
+
+  // API keys
+  setApiKeys: (newsApiKey: string, alphaVantageKey: string) => void;
+
   // Sorting
   setSortBy: (sortBy: 'latest' | 'oldest' | 'sentiment' | 'impact') => void;
   getSortedArticles: () => Article[];
@@ -48,6 +55,8 @@ export const useNewsStore = create<NewsState>()(
       error: null,
       bookmarks: [],
       isDarkMode: false,
+      newsApiKey: '',
+      alphaVantageKey: '',
       sortBy: 'latest',
 
       // Actions
@@ -81,6 +90,11 @@ export const useNewsStore = create<NewsState>()(
       // Theme
       toggleTheme: () => {
         set({ isDarkMode: !get().isDarkMode });
+      },
+
+      // API keys
+      setApiKeys: (newsApiKey, alphaVantageKey) => {
+        set({ newsApiKey: newsApiKey.trim(), alphaVantageKey: alphaVantageKey.trim() });
       },
 
       // Sorting
@@ -121,6 +135,8 @@ export const useNewsStore = create<NewsState>()(
       partialize: (state) => ({
         bookmarks: state.bookmarks,
         isDarkMode: state.isDarkMode,
+        newsApiKey: state.newsApiKey,
+        alphaVantageKey: state.alphaVantageKey,
       }),
     }
   )

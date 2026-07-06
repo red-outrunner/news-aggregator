@@ -3,6 +3,7 @@
 import { useEffect, useState } from 'react';
 import { StockMention } from '@/lib/stockExtractor';
 import { StockData } from '@/lib/types';
+import { useNewsStore } from '@/store/newsStore';
 
 interface StockTickerProps {
   mentions: StockMention[];
@@ -26,6 +27,7 @@ function getMarket(symbol: string): string {
 export default function StockTicker({ mentions }: StockTickerProps) {
   const [stockData, setStockData] = useState<StockData[]>([]);
   const [loading, setLoading] = useState(true);
+  const alphaVantageKey = useNewsStore((state) => state.alphaVantageKey);
 
   useEffect(() => {
     if (mentions.length === 0) {
@@ -36,9 +38,11 @@ export default function StockTicker({ mentions }: StockTickerProps) {
     const fetchStockData = async () => {
       setLoading(true);
       const symbols = mentions.map(m => m.symbol).join(',');
-      
+
       try {
-        const response = await fetch(`/api/stock?symbols=${symbols}`);
+        const response = await fetch(`/api/stock?symbols=${symbols}`, {
+          headers: alphaVantageKey ? { 'X-Alpha-Vantage-Key': alphaVantageKey } : undefined,
+        });
         const data = await response.json();
         const stocksWithMarket = (data.stocks || []).map((stock: StockData) => ({
           ...stock,
@@ -53,7 +57,7 @@ export default function StockTicker({ mentions }: StockTickerProps) {
     };
 
     fetchStockData();
-  }, [mentions]);
+  }, [mentions, alphaVantageKey]);
 
   if (mentions.length === 0 || (!loading && stockData.length === 0)) {
     return null;

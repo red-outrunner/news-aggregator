@@ -6,3 +6,4 @@ export { default as BookmarksModal } from './BookmarksModal';
 export { default as ThemeToggle } from './ThemeToggle';
 export { default as StockTicker } from './StockTicker';
 export { default as Sidebar } from './Sidebar';
+export { default as ApiKeyModal } from './ApiKeyModal';

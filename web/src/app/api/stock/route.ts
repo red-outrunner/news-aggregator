@@ -5,9 +5,7 @@ import { StockData } from '@/lib/types';
  * Fetches stock data from Alpha Vantage API
  * Free tier: 25 requests/day, 5 requests/minute
  */
-async function fetchStockDataAlphaVantage(symbol: string): Promise<StockData | null> {
-  const apiKey = process.env.ALPHA_VANTAGE_API_KEY;
-  
+async function fetchStockDataAlphaVantage(symbol: string, apiKey: string | undefined): Promise<StockData | null> {
   if (!apiKey) {
     return null;
   }
@@ -123,10 +121,13 @@ export async function GET(request: NextRequest) {
   const symbols = symbolsParam.split(',').map(s => s.trim().toUpperCase());
   const stockData: StockData[] = [];
 
+  // User-supplied key (from site settings) takes priority over the server's key
+  const alphaVantageKey = request.headers.get('x-alpha-vantage-key') || process.env.ALPHA_VANTAGE_API_KEY;
+
   // Fetch data for each symbol (with rate limiting consideration)
   for (const symbol of symbols) {
     // Try Alpha Vantage first
-    let data = await fetchStockDataAlphaVantage(symbol);
+    let data = await fetchStockDataAlphaVantage(symbol, alphaVantageKey);
     
     // Fallback to Yahoo if Alpha Vantage fails or no API key
     if (!data) {
