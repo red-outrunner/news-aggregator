@@ -20,6 +20,9 @@ interface NewsState {
   newsApiKey: string;
   alphaVantageKey: string;
 
+  // Layout (persisted)
+  viewMode: 'list' | 'grid';
+
   // Sorting
   sortBy: 'latest' | 'oldest' | 'sentiment' | 'impact';
 
@@ -39,6 +42,9 @@ interface NewsState {
   // API keys
   setApiKeys: (newsApiKey: string, alphaVantageKey: string) => void;
 
+  // Layout
+  setViewMode: (viewMode: 'list' | 'grid') => void;
+
   // Sorting
   setSortBy: (sortBy: 'latest' | 'oldest' | 'sentiment' | 'impact') => void;
   getSortedArticles: () => Article[];
@@ -57,6 +63,7 @@ export const useNewsStore = create<NewsState>()(
       isDarkMode: false,
       newsApiKey: '',
       alphaVantageKey: '',
+      viewMode: 'list',
       sortBy: 'latest',
 
       // Actions
@@ -96,6 +103,9 @@ export const useNewsStore = create<NewsState>()(
       setApiKeys: (newsApiKey, alphaVantageKey) => {
         set({ newsApiKey: newsApiKey.trim(), alphaVantageKey: alphaVantageKey.trim() });
       },
+
+      // Layout
+      setViewMode: (viewMode) => set({ viewMode }),
 
       // Sorting
       setSortBy: (sortBy) => set({ sortBy }),
@@ -137,6 +147,7 @@ export const useNewsStore = create<NewsState>()(
         isDarkMode: state.isDarkMode,
         newsApiKey: state.newsApiKey,
         alphaVantageKey: state.alphaVantageKey,
+        viewMode: state.viewMode,
       }),
     }
   )

@@ -14,81 +14,89 @@ interface ArticleCardProps {
   isBookmarked: boolean;
   onToggleBookmark: (article: Article) => void;
   stockMentions: StockMention[];
+  layout?: 'list' | 'grid';
 }
 
 export default function ArticleCard({
   article,
   isBookmarked,
   onToggleBookmark,
-  stockMentions
+  stockMentions,
+  layout = 'list'
 }: ArticleCardProps) {
   const [showReaction, setShowReaction] = useState(false);
+  const [imageBroken, setImageBroken] = useState(false);
   const chartableMentions = stockMentions.filter((m) => m.type === 'stock' || m.type === 'etf');
-  const sentimentColor = 
-    (article.sentimentScore || 0) > 0 ? 'text-green-600 dark:text-green-400' :
-    (article.sentimentScore || 0) < 0 ? 'text-red-600 dark:text-red-400' :
-    'text-gray-600 dark:text-gray-400';
 
-  const sentimentLabel = 
-    (article.sentimentScore || 0) > 0 ? 'Bullish' :
-    (article.sentimentScore || 0) < 0 ? 'Bearish' :
-    'Neutral';
+  const score = article.sentimentScore || 0;
+  const sentiment =
+    score > 0
+      ? { label: 'Bullish', badge: 'bg-emerald-500/90 text-white' }
+      : score < 0
+      ? { label: 'Bearish', badge: 'bg-red-500/90 text-white' }
+      : { label: 'Neutral', badge: 'bg-gray-500/80 text-white' };
 
-  const sentimentBg = 
-    (article.sentimentScore || 0) > 0 ? 'bg-green-100 dark:bg-green-900/30' :
-    (article.sentimentScore || 0) < 0 ? 'bg-red-100 dark:bg-red-900/30' :
-    'bg-gray-100 dark:bg-gray-700';
+  const isGrid = layout === 'grid';
+  const showImage = article.urlToImage && !imageBroken;
+
+  const image = showImage && (
+    <div
+      className={`relative overflow-hidden flex-shrink-0 ${
+        isGrid ? 'h-44 w-full' : 'lg:w-64 h-48 lg:h-auto'
+      }`}
+    >
+      <img
+        src={article.urlToImage}
+        alt={article.title}
+        className="w-full h-full object-cover transition-transform duration-500 group-hover:scale-[1.04]"
+        onError={() => setImageBroken(true)}
+      />
+      <div className="absolute inset-0 bg-gradient-to-t from-black/20 to-transparent pointer-events-none" />
+      <span
+        className={`absolute top-3 left-3 ${sentiment.badge} backdrop-blur-sm text-[11px] font-semibold px-2.5 py-1 rounded-full shadow-sm`}
+      >
+        {sentiment.label}
+      </span>
+    </div>
+  );
 
   return (
-    <article className="bg-white dark:bg-gray-800 rounded-lg shadow-sm border border-gray-200 dark:border-gray-700 
-                        hover:shadow-md transition-all duration-200 overflow-hidden">
-      <div className="flex flex-col lg:flex-row">
-        {/* Image */}
-        {article.urlToImage && (
-          <div className="lg:w-64 h-48 lg:h-auto flex-shrink-0 relative overflow-hidden">
-            <img
-              src={article.urlToImage}
-              alt={article.title}
-              className="w-full h-full object-cover hover:scale-105 transition-transform duration-300"
-              onError={(e) => {
-                (e.target as HTMLImageElement).style.display = 'none';
-              }}
-            />
-            <div className="absolute top-2 left-2">
-              <span className={`${sentimentBg} ${sentimentColor} text-xs font-semibold px-2 py-1 rounded-full`}>
-                {sentimentLabel}
-              </span>
-            </div>
-          </div>
-        )}
-        
+    <article
+      className={`group bg-white dark:bg-gray-900 rounded-2xl border border-gray-200/80 dark:border-gray-800
+                  shadow-sm hover:shadow-xl hover:-translate-y-0.5 hover:border-gray-300 dark:hover:border-gray-700
+                  transition-all duration-300 overflow-hidden ${isGrid ? 'flex flex-col h-full' : ''}`}
+    >
+      <div className={isGrid ? 'flex flex-col h-full' : 'flex flex-col lg:flex-row'}>
+        {image}
+
         {/* Content */}
-        <div className="flex-1 p-5">
+        <div className={`flex-1 p-5 ${isGrid ? 'flex flex-col' : ''}`}>
           {/* Meta row */}
-          <div className="flex items-center justify-between mb-2">
-            <div className="flex items-center gap-3">
-              <span className="text-xs text-gray-500 dark:text-gray-400">
+          <div className="flex items-center justify-between mb-2.5">
+            <div className="flex items-center gap-2 flex-wrap min-w-0">
+              {!showImage && (
+                <span className={`${sentiment.badge} text-[11px] font-semibold px-2 py-0.5 rounded-full`}>
+                  {sentiment.label}
+                </span>
+              )}
+              <span className="text-xs text-gray-500 dark:text-gray-400 whitespace-nowrap">
                 {humanTime(article.publishedAt)}
               </span>
-              <span className="text-gray-300 dark:text-gray-600">•</span>
-              <div className="flex items-center gap-2">
-                <span className="text-xs font-medium text-purple-600 dark:text-purple-400">
-                  Impact: {article.impactScore || 0}
-                </span>
-                <span className="text-xs text-gray-300 dark:text-gray-600">|</span>
-                <span className="text-xs font-medium text-orange-600 dark:text-orange-400">
-                  Policy: {article.policyProbability || 0}%
-                </span>
-              </div>
+              <span className="text-[11px] font-medium px-2 py-0.5 rounded-full bg-violet-50 dark:bg-violet-500/10 text-violet-600 dark:text-violet-400 whitespace-nowrap">
+                Impact {article.impactScore || 0}
+              </span>
+              <span className="text-[11px] font-medium px-2 py-0.5 rounded-full bg-amber-50 dark:bg-amber-500/10 text-amber-600 dark:text-amber-400 whitespace-nowrap">
+                Policy {article.policyProbability || 0}%
+              </span>
             </div>
 
             {/* Bookmark Button */}
             <button
               onClick={() => onToggleBookmark(article)}
-              className={`p-2 rounded-lg transition-colors duration-200 ${
+              className={`p-2 rounded-full transition-all duration-200 flex-shrink-0 ml-2 ${
                 isBookmarked
-                  ? 'bg-blue-100 dark:bg-blue-900 text-blue-600 dark:text-blue-400'
-                  : 'bg-gray-100 dark:bg-gray-700 text-gray-600 dark:text-gray-400 hover:bg-gray-200 dark:hover:bg-gray-600'
+                  ? 'bg-blue-600 text-white shadow-sm'
+                  : 'bg-gray-100 dark:bg-gray-800 text-gray-500 dark:text-gray-400 hover:bg-gray-200 dark:hover:bg-gray-700'
               }`}
               title={isBookmarked ? 'Remove bookmark' : 'Add bookmark'}
             >
@@ -105,7 +113,12 @@ export default function ArticleCard({
           </div>
 
           {/* Title */}
-          <h2 className="text-xl font-bold text-gray-900 dark:text-gray-100 mb-2 line-clamp-2 hover:text-blue-600 dark:hover:text-blue-400 transition-colors">
+          <h2
+            className={`font-bold text-gray-900 dark:text-gray-100 mb-2 line-clamp-2 tracking-tight
+                        group-hover:text-blue-600 dark:group-hover:text-blue-400 transition-colors ${
+                          isGrid ? 'text-base leading-snug' : 'text-xl'
+                        }`}
+          >
             <a href={article.url} target="_blank" rel="noopener noreferrer">
               {article.title}
             </a>
@@ -113,38 +126,35 @@ export default function ArticleCard({
 
           {/* Description */}
           {article.description && (
-            <p className="text-gray-600 dark:text-gray-400 text-sm mb-4 line-clamp-3 leading-relaxed">
+            <p
+              className={`text-gray-600 dark:text-gray-400 text-sm mb-4 leading-relaxed ${
+                isGrid ? 'line-clamp-2' : 'line-clamp-3'
+              }`}
+            >
               {article.description}
             </p>
           )}
 
           {/* Stock Mentions */}
           {stockMentions.length > 0 && (
-            <div className="mb-4 pb-4 border-b border-gray-100 dark:border-gray-700">
-              <div className="flex items-center gap-2 mb-2">
-                <svg className="w-4 h-4 text-gray-400" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                  <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M13 7h8m0 0v8m0-8l-8 8-4-4-6 6" />
-                </svg>
-                <span className="text-xs font-semibold text-gray-500 dark:text-gray-400 uppercase tracking-wider">
-                  Stocks Mentioned
-                </span>
-              </div>
-              <div className="flex flex-wrap items-center gap-2">
-                {stockMentions.map((stock) => (
+            <div className={`mb-4 ${isGrid ? 'mt-auto' : ''}`}>
+              <div className="flex flex-wrap items-center gap-1.5">
+                {stockMentions.slice(0, isGrid ? 3 : 8).map((stock) => (
                   <span
                     key={stock.symbol}
-                    className="inline-flex items-center gap-1 bg-gray-100 dark:bg-gray-700
-                               text-gray-700 dark:text-gray-300 text-xs font-medium px-2 py-1 rounded"
+                    className="inline-flex items-center gap-1 bg-gray-100 dark:bg-gray-800
+                               text-gray-700 dark:text-gray-300 text-[11px] font-semibold px-2 py-1 rounded-full"
                   >
-                    <span className="font-bold">{stock.symbol}</span>
-                    <span className="text-gray-500 dark:text-gray-400 text-xs">{stock.type}</span>
+                    {stock.symbol}
+                    <span className="font-normal text-gray-400 dark:text-gray-500">{stock.type}</span>
                   </span>
                 ))}
                 {chartableMentions.length > 0 && (
                   <button
                     onClick={() => setShowReaction(true)}
-                    className="inline-flex items-center gap-1.5 text-xs font-semibold px-2.5 py-1 rounded
-                               bg-blue-600 hover:bg-blue-700 text-white transition-colors duration-200"
+                    className="inline-flex items-center gap-1.5 text-[11px] font-semibold px-2.5 py-1 rounded-full
+                               bg-gradient-to-r from-blue-600 to-violet-600 hover:from-blue-500 hover:to-violet-500
+                               text-white shadow-sm transition-all duration-200"
                     title="Interactive 3D chart of how these stocks moved in the 24h after this article"
                   >
                     <svg className="w-3.5 h-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
@@ -158,24 +168,23 @@ export default function ArticleCard({
             </div>
           )}
 
-          {/* Action Buttons */}
-          <div className="flex items-center justify-between">
+          {/* Action Row */}
+          <div className={`flex items-center justify-between ${isGrid && stockMentions.length === 0 ? 'mt-auto' : ''}`}>
             <a
               href={article.url}
               target="_blank"
               rel="noopener noreferrer"
-              className="inline-flex items-center gap-2 text-blue-600 dark:text-blue-400 
-                         hover:text-blue-700 dark:hover:text-blue-300 text-sm font-medium 
-                         transition-colors duration-200"
+              className="inline-flex items-center gap-1.5 text-blue-600 dark:text-blue-400
+                         hover:gap-2.5 text-sm font-semibold transition-all duration-200"
             >
-              Read Full Article
+              Read article
               <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M9 5l7 7-7 7" />
+                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M17 8l4 4m0 0l-4 4m4-4H3" />
               </svg>
             </a>
 
-            <span className="text-xs text-gray-400 dark:text-gray-500">
-              Source: {new URL(article.url).hostname}
+            <span className="text-xs text-gray-400 dark:text-gray-500 truncate ml-3">
+              {new URL(article.url).hostname.replace(/^www\./, '')}
             </span>
           </div>
         </div>

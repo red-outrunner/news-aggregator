@@ -26,7 +26,9 @@ export default function Home() {
     isDarkMode,
     newsApiKey,
     alphaVantageKey,
+    viewMode,
     sortBy,
+    setViewMode,
     setArticles,
     setLoading,
     setError,
@@ -131,20 +133,20 @@ export default function Home() {
   const sortedArticles = getSortedArticles();
 
   return (
-    <div className="min-h-screen bg-gray-100 dark:bg-gray-900 transition-colors duration-200">
+    <div className="min-h-screen bg-gray-50 dark:bg-gray-950 transition-colors duration-200">
       {/* Header */}
-      <header className="sticky top-0 z-40 bg-white dark:bg-gray-800 border-b border-gray-200 dark:border-gray-700 shadow-sm">
+      <header className="sticky top-0 z-40 bg-white/75 dark:bg-gray-950/75 backdrop-blur-xl border-b border-gray-200/70 dark:border-gray-800/70">
         <div className="max-w-[1600px] mx-auto px-4 sm:px-6 lg:px-8">
           <div className="flex items-center justify-between h-16">
             {/* Logo */}
             <div className="flex items-center gap-3">
-              <div className="w-10 h-10 bg-gradient-to-br from-blue-600 to-blue-700 rounded-lg flex items-center justify-center">
+              <div className="w-10 h-10 bg-gradient-to-br from-blue-600 to-violet-600 rounded-xl flex items-center justify-center shadow-lg shadow-blue-600/20">
                 <svg className="w-6 h-6 text-white" fill="none" stroke="currentColor" viewBox="0 0 24 24">
                   <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M19 20H5a2 2 0 01-2-2V6a2 2 0 012-2h10a2 2 0 012 2v1m2 13a2 2 0 01-2-2V7m2 13a2 2 0 002-2V9a2 2 0 00-2-2h-2m-4-3H9M7 16h6M7 8h6v4H7V8z" />
                 </svg>
               </div>
               <div>
-                <h1 className="text-xl font-bold text-gray-900 dark:text-gray-100">News Aggregator</h1>
+                <h1 className="text-xl font-bold text-gray-900 dark:text-gray-100 tracking-tight">News Aggregator</h1>
                 <p className="text-xs text-gray-500 dark:text-gray-400">Smart News Analysis</p>
               </div>
             </div>
@@ -180,7 +182,7 @@ export default function Home() {
           {/* Main Content Area */}
           <div className="lg:col-span-3 space-y-6">
             {/* Search */}
-            <div className="bg-white dark:bg-gray-800 rounded-lg shadow-sm border border-gray-200 dark:border-gray-700 p-4">
+            <div className="bg-white dark:bg-gray-900 rounded-2xl shadow-sm border border-gray-200/80 dark:border-gray-800 p-4">
               <SearchBar onSearch={handleSearch} isLoading={isLoading} />
               {tickerExpansion && !error && (
                 <p className="mt-2 text-xs text-gray-500 dark:text-gray-400 flex items-center gap-1.5">
@@ -208,18 +210,33 @@ export default function Home() {
               onSortChange={setSortBy}
               totalResults={totalResults}
               onOpenBookmarks={() => setShowBookmarks(true)}
+              viewMode={viewMode}
+              onViewModeChange={setViewMode}
             />
 
             {/* Articles List */}
             {isLoading && articles.length === 0 ? (
-              <div className="flex items-center justify-center py-16">
-                <div className="text-center">
-                  <svg className="animate-spin h-10 w-10 text-blue-600 mx-auto mb-4" viewBox="0 0 24 24">
-                    <circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4" fill="none" />
-                    <path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4zm2 5.291A7.962 7.962 0 014 12H0c0 3.042 1.135 5.824 3 7.938l3-2.647z" />
-                  </svg>
-                  <p className="text-gray-600 dark:text-gray-400">Fetching latest news...</p>
-                </div>
+              <div className="space-y-5" aria-label="Loading articles">
+                {[0, 1, 2].map((i) => (
+                  <div
+                    key={i}
+                    className="bg-white dark:bg-gray-900 rounded-2xl border border-gray-200/80 dark:border-gray-800 overflow-hidden"
+                  >
+                    <div className="flex flex-col lg:flex-row animate-pulse">
+                      <div className="lg:w-64 h-48 bg-gray-200 dark:bg-gray-800 flex-shrink-0" />
+                      <div className="flex-1 p-5 space-y-3.5">
+                        <div className="h-3 w-44 bg-gray-200 dark:bg-gray-800 rounded-full" />
+                        <div className="h-5 w-3/4 bg-gray-200 dark:bg-gray-800 rounded-full" />
+                        <div className="h-3 w-full bg-gray-200 dark:bg-gray-800 rounded-full" />
+                        <div className="h-3 w-2/3 bg-gray-200 dark:bg-gray-800 rounded-full" />
+                        <div className="flex gap-2 pt-1">
+                          <div className="h-6 w-16 bg-gray-200 dark:bg-gray-800 rounded-full" />
+                          <div className="h-6 w-16 bg-gray-200 dark:bg-gray-800 rounded-full" />
+                        </div>
+                      </div>
+                    </div>
+                  </div>
+                ))}
               </div>
             ) : (
               <ArticleList
@@ -227,6 +244,7 @@ export default function Home() {
                 isBookmarked={isBookmarked}
                 onToggleBookmark={toggleBookmark}
                 stockMentionsMap={stockMentionsMap}
+                viewMode={viewMode}
               />
             )}
           </div>

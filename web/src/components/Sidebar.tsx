@@ -9,7 +9,7 @@ export default function Sidebar({ trendingTopics, onTopicClick }: SidebarProps) 
   return (
     <aside className="space-y-6">
       {/* Trending Topics */}
-      <div className="bg-white dark:bg-gray-800 rounded-lg shadow-sm border border-gray-200 dark:border-gray-700 p-4">
+      <div className="bg-white dark:bg-gray-900 rounded-2xl shadow-sm border border-gray-200/80 dark:border-gray-800 p-4">
         <div className="flex items-center gap-2 mb-4">
           <svg className="w-5 h-5 text-red-500" fill="currentColor" viewBox="0 0 20 20">
             <path fillRule="evenodd" d="M12.395 2.553a1 1 0 00-1.45-.385c-.345.23-.614.558-.822.88-.214.33-.403.713-.57 1.116-.334.804-.614 1.768-.84 2.734a31.365 31.365 0 00-.613 3.58 2.64 2.64 0 01-.945-1.067c-.328-.68-.398-1.534-.398-2.654A1 1 0 005.05 6.05 6.981 6.981 0 003 11a7 7 0 1011.95-4.95c-.592-.591-.98-.985-1.348-1.467-.363-.476-.724-1.063-1.207-2.03zM12.12 15.12A3 3 0 017 13s.879.5 2.5.5c0-1 .5-4 1.25-4.5.5 1 .786 1.293 1.371 1.879A2.99 2.99 0 0113 13a2.99 2.99 0 01-.879 2.121z" clipRule="evenodd" />
@@ -22,8 +22,8 @@ export default function Sidebar({ trendingTopics, onTopicClick }: SidebarProps) 
               <button
                 key={topic}
                 onClick={() => onTopicClick(topic)}
-                className="w-full flex items-center justify-between p-2 rounded-lg 
-                           hover:bg-gray-50 dark:hover:bg-gray-700 transition-colors group"
+                className="w-full flex items-center justify-between p-2 rounded-xl
+                           hover:bg-gray-50 dark:hover:bg-gray-800 transition-colors group"
               >
                 <div className="flex items-center gap-3">
                   <span className="text-xs font-semibold text-gray-400 w-4">{index + 1}</span>
@@ -46,7 +46,7 @@ export default function Sidebar({ trendingTopics, onTopicClick }: SidebarProps) 
       </div>
 
       {/* Global Markets Summary */}
-      <div className="bg-gradient-to-br from-blue-600 to-purple-700 rounded-lg shadow-sm p-4 text-white">
+      <div className="bg-gradient-to-br from-blue-600 to-violet-700 rounded-2xl shadow-lg shadow-blue-600/15 p-4 text-white">
         <div className="flex items-center gap-2 mb-3">
           <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
             <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M3.055 11H5a2 2 0 012 2v1a2 2 0 002 2 2 2 0 012 2v2.945M8 3.935V5.5A2.5 2.5 0 0010.5 8h.5a2 2 0 012 2 2 2 0 104 0 2 2 0 012-2h1.064M15 20.488V18a2 2 0 012-2h3.064M21 12a9 9 0 11-18 0 9 9 0 0118 0z" />
@@ -91,7 +91,7 @@ export default function Sidebar({ trendingTopics, onTopicClick }: SidebarProps) 
       </div>
 
       {/* Analysis Stats */}
-      <div className="bg-white dark:bg-gray-800 rounded-lg shadow-sm border border-gray-200 dark:border-gray-700 p-4">
+      <div className="bg-white dark:bg-gray-900 rounded-2xl shadow-sm border border-gray-200/80 dark:border-gray-800 p-4">
         <h3 className="text-sm font-bold text-gray-900 dark:text-gray-100 mb-3">
           Analysis Stats
         </h3>
