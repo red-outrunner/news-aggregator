@@ -36,3 +36,15 @@ export function humanTime(dateString: string): string {
 export function formatNumber(num: number): string {
   return num.toLocaleString('en-US');
 }
+
+/**
+ * Hostname of a URL without the www. prefix; falls back to the raw
+ * string so a malformed article URL can't crash a render
+ */
+export function safeHostname(url: string): string {
+  try {
+    return new URL(url).hostname.replace(/^www\./, '');
+  } catch {
+    return url;
+  }
+}

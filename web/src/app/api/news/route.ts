@@ -74,7 +74,7 @@ export async function GET(request: NextRequest) {
     // Calculate scores for each article server-side
     const articlesWithScores = data.articles.map((article: Article) => ({
       ...article,
-      ...analyzeArticle(`${article.title} ${article.description}`),
+      ...analyzeArticle(`${article.title ?? ''} ${article.description ?? ''}`),
     }));
 
     return NextResponse.json({

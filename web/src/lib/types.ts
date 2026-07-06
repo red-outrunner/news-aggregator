@@ -10,26 +10,6 @@ export interface Article {
   policyProbability?: number;
 }
 
-// NewsAPI response structure
-export interface NewsResponse {
-  status: string;
-  totalResults: number;
-  articles: Article[];
-}
-
-// API request/response types
-export interface NewsRequest {
-  query: string;
-  page?: number;
-  fromDate?: string;
-  toDate?: string;
-}
-
-export interface NewsResult {
-  articles: Article[];
-  totalResults: number;
-}
-
 // Stock quote data returned by /api/stock
 export interface StockData {
   symbol: string;

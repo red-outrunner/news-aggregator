@@ -3,25 +3,11 @@
 import { useEffect, useState } from 'react';
 import { StockMention } from '@/lib/stockExtractor';
 import { StockData } from '@/lib/types';
+import { getMarket } from '@/lib/markets';
 import { useNewsStore } from '@/store/newsStore';
 
 interface StockTickerProps {
   mentions: StockMention[];
-}
-
-// Get market/region from symbol
-function getMarket(symbol: string): string {
-  const jsePrefixes = ['AGL', 'ANG', 'ARI', 'BHP', 'BVT', 'CFR', 'CLS', 'CPI', 'DRM', 'EXX', 'FSR', 'GFI', 'GOLD', 'HAR', 'IMP', 'INL', 'INP', 'KIO', 'LHC', 'MNP', 'MRP', 'NPN', 'OMU', 'PIK', 'PPC', 'REM', 'RMI', 'SHP', 'SLM', 'SOL', 'SSW', 'TCG', 'TFG', 'VOD', 'WHL', 'WKP', 'ZMP', 'MTN', 'TKG', 'SBK', 'NED', 'DSY', 'BID', 'BAW', 'DCP', 'MEH', 'NTC', 'LHC', 'APN', 'ADI', 'MSM', 'PPK', 'JDG', 'LEW', 'MTC', 'GRT', 'RDF', 'HYB', 'NEP', 'VKE', 'ACT', 'CAP', 'DIP', 'EMS', 'FAIR'];
-  const asxPrefixes = ['CBA', 'WBC', 'NAB', 'ANZ', 'MQG', 'QBE', 'WES', 'FMG', 'STO', 'WDS', 'COL', 'WOW', 'TLS', 'TCL', 'ALL', 'IAG', 'SUN', 'AMP', 'BEN', 'BOQ', 'CSL', 'RMD', 'COH', 'SHL', 'ANN', 'SGP', 'MGR', 'XRO', 'WTC', 'NEC', 'CPU', 'APT', 'ZIP', 'QAN', 'SYD', 'APA', 'ALX', 'AZJ', 'BXB', 'JHX', 'LLC', 'LYC', 'MIN', 'NCM', 'NST', 'ORG', 'PLS', 'SEK', 'TAH', 'TWE', 'VEA', 'WHC', 'YAL'];
-  const lseSuffixes = ['.L', 'HSBA', 'BP', 'SHEL', 'AZN', 'GSK', 'DGE', 'ULVR', 'RIO', 'AAL', 'LSEG', 'LLOY', 'BARC', 'VOD', 'BT.A', 'NG', 'GLEN', 'PRU', 'AHT', 'BA', 'CRH', 'FLTR', 'REL', 'EXPN', 'WPP', 'IAG', 'RR', 'CCH', 'TSCO', 'MRO', 'RTO', 'SMDS', 'BRBY', 'JD', 'OCDO', 'PSON', 'WTB', 'MNDI', 'HWDN', 'BDEV'];
-  const hkexNumeric = /^\d{4}$/; // HKEX uses 4-digit codes
-  
-  if (hkexNumeric.test(symbol)) return 'HKEX';
-  if (jsePrefixes.includes(symbol)) return 'JSE';
-  if (asxPrefixes.includes(symbol)) return 'ASX';
-  if (lseSuffixes.some(s => symbol.includes(s))) return 'LSE';
-  if (/^\d{4}$/.test(symbol)) return 'TSE'; // Tokyo
-  return 'NYSE/NASDAQ';
 }
 
 export default function StockTicker({ mentions }: StockTickerProps) {

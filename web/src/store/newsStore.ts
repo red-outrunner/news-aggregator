@@ -111,33 +111,31 @@ export const useNewsStore = create<NewsState>()(
       setSortBy: (sortBy) => set({ sortBy }),
 
       getSortedArticles: () => {
-        const articles = [...get().articles];
-        const sortBy = get().sortBy;
+        const { articles, sortBy } = get();
+        const sorted = [...articles];
 
         switch (sortBy) {
           case 'latest':
-            articles.sort((a, b) => 
-              new Date(b.publishedAt).getTime() - new Date(a.publishedAt).getTime()
+          case 'oldest': {
+            // Parse each date once instead of in every comparison
+            const timestamps = new Map(
+              sorted.map((a) => [a.url, new Date(a.publishedAt).getTime()])
+            );
+            const direction = sortBy === 'latest' ? -1 : 1;
+            sorted.sort(
+              (a, b) => direction * (timestamps.get(a.url)! - timestamps.get(b.url)!)
             );
             break;
-          case 'oldest':
-            articles.sort((a, b) => 
-              new Date(a.publishedAt).getTime() - new Date(b.publishedAt).getTime()
-            );
-            break;
+          }
           case 'sentiment':
-            articles.sort((a, b) => 
-              (b.sentimentScore || 0) - (a.sentimentScore || 0)
-            );
+            sorted.sort((a, b) => (b.sentimentScore || 0) - (a.sentimentScore || 0));
             break;
           case 'impact':
-            articles.sort((a, b) => 
-              (b.impactScore || 0) - (a.impactScore || 0)
-            );
+            sorted.sort((a, b) => (b.impactScore || 0) - (a.impactScore || 0));
             break;
         }
 
-        return articles;
+        return sorted;
       },
     }),
     {

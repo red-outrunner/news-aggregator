@@ -118,30 +118,33 @@ export async function GET(request: NextRequest) {
     );
   }
 
-  const symbols = symbolsParam.split(',').map(s => s.trim().toUpperCase());
-  const stockData: StockData[] = [];
+  const symbols = [...new Set(
+    symbolsParam.split(',').map(s => s.trim().toUpperCase()).filter(Boolean)
+  )];
 
   // User-supplied key (from site settings) takes priority over the server's key
   const alphaVantageKey = request.headers.get('x-alpha-vantage-key') || process.env.ALPHA_VANTAGE_API_KEY;
 
-  // Fetch data for each symbol (with rate limiting consideration)
-  for (const symbol of symbols) {
-    // Try Alpha Vantage first
-    let data = await fetchStockDataAlphaVantage(symbol, alphaVantageKey);
-    
-    // Fallback to Yahoo if Alpha Vantage fails or no API key
-    if (!data) {
-      data = await fetchStockDataYahoo(symbol);
+  let stockData: StockData[];
+  if (alphaVantageKey) {
+    // Alpha Vantage free tier allows 5 requests/minute, so fetch sequentially
+    // with a delay, falling back to Yahoo per symbol
+    stockData = [];
+    for (let i = 0; i < symbols.length; i++) {
+      const data =
+        (await fetchStockDataAlphaVantage(symbols[i], alphaVantageKey)) ??
+        (await fetchStockDataYahoo(symbols[i]));
+      if (data) {
+        stockData.push(data);
+      }
+      if (i < symbols.length - 1) {
+        await new Promise(resolve => setTimeout(resolve, 200));
+      }
     }
-
-    if (data) {
-      stockData.push(data);
-    }
-
-    // Rate limiting: wait between requests
-    if (symbols.indexOf(symbol) < symbols.length - 1) {
-      await new Promise(resolve => setTimeout(resolve, 200));
-    }
+  } else {
+    // No Alpha Vantage key: Yahoo has no such limit, fetch all in parallel
+    const results = await Promise.all(symbols.map(fetchStockDataYahoo));
+    stockData = results.filter((d): d is StockData => d !== null);
   }
 
   return NextResponse.json({

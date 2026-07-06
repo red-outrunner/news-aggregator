@@ -29,11 +29,6 @@ const indices = [
   'DXY', 'Dollar Index', 'US Dollar', 'Gold Index', 'Oil Index',
 ];
 
-// Common stock ticker patterns
-const tickerPatterns = [
-  /\b[A-Z]{1,5}\b/g, // Standard tickers (1-5 uppercase letters)
-];
-
 // Known tickers to look for (major companies across global markets)
 const knownTickers = new Set([
   // === US MARKET (NYSE/NASDAQ) ===
@@ -312,6 +307,25 @@ for (const [company, ticker] of Object.entries(companyToTicker)) {
   }
 }
 
+// Case-insensitive whole-word pattern, compiled once at module load.
+// Word boundaries matter: substring matching flagged "STI" inside
+// "estimates" and "RUT" inside "scrutiny".
+function wordBoundaryPattern(phrase: string): RegExp {
+  const escaped = phrase.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+  return new RegExp(`\\b${escaped}\\b`, 'i');
+}
+
+const indexPatterns = indices.map((name) => ({
+  name,
+  pattern: wordBoundaryPattern(name),
+}));
+
+const companyPatterns = Object.entries(companyToTicker).map(([company, ticker]) => ({
+  company,
+  ticker,
+  pattern: wordBoundaryPattern(company),
+}));
+
 export interface StockMention {
   symbol: string;
   name: string;
@@ -357,24 +371,23 @@ export function expandTickerQuery(query: string): TickerExpansion | null {
 export function extractStockMentions(text: string): StockMention[] {
   const mentions: StockMention[] = [];
   const foundSymbols = new Set<string>();
-  const textLower = text.toLowerCase();
 
-  // Check for index mentions
-  for (const index of indices) {
-    if (textLower.includes(index.toLowerCase())) {
+  // Check for index mentions (whole words only)
+  for (const { name, pattern } of indexPatterns) {
+    if (pattern.test(text)) {
       mentions.push({
-        symbol: index.toUpperCase(),
-        name: index,
+        symbol: name.toUpperCase(),
+        name,
         type: 'index',
         context: '',
       });
-      foundSymbols.add(index.toUpperCase());
+      foundSymbols.add(name.toUpperCase());
     }
   }
 
-  // Check for company names and map to tickers
-  for (const [company, ticker] of Object.entries(companyToTicker)) {
-    if (!foundSymbols.has(ticker) && textLower.includes(company.toLowerCase())) {
+  // Check for company names and map to tickers (whole words only)
+  for (const { company, ticker, pattern } of companyPatterns) {
+    if (!foundSymbols.has(ticker) && pattern.test(text)) {
       mentions.push({
         symbol: ticker,
         name: company,

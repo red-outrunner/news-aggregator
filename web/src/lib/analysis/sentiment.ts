@@ -4,7 +4,7 @@
 // 2. Regex with word boundaries for accurate phrase matching
 // 3. Modular design for future NLP library integration
 
-import { createWordBoundaryPattern } from './text';
+import { compileWordBoundaryPatterns } from './text';
 
 // Positive keywords for sentiment analysis
 const positiveKeywords = new Set([
@@ -53,16 +53,20 @@ const negativePhrases = [
 ];
 
 // Negation words that reverse sentiment
-const negationWords = [
+const negationWords = new Set([
   "not", "no", "never", "neither", "nobody", "nothing", "nowhere",
   "lack", "lacking", "lacks", "lacked",
   "without", "hardly", "barely", "scarcely",
   "fail", "failed", "fails", "failing",
   "unlikely", "impossible", "cannot", "can't", "won't", "wouldn't", "couldn't", "shouldn't",
-];
+]);
 
 // Window size for negation detection (number of words to look back)
 const NEGATION_WINDOW = 3;
+
+// Patterns are compiled once at module load, not per article
+const positivePhrasePatterns = compileWordBoundaryPatterns(positivePhrases);
+const negativePhrasePatterns = compileWordBoundaryPatterns(negativePhrases);
 
 /**
  * Checks if a word is negated by looking at preceding words
@@ -70,11 +74,20 @@ const NEGATION_WINDOW = 3;
 function isNegated(words: string[], currentIndex: number): boolean {
   const start = Math.max(0, currentIndex - NEGATION_WINDOW);
   for (let i = start; i < currentIndex; i++) {
-    if (negationWords.includes(words[i])) {
+    if (negationWords.has(words[i])) {
       return true;
     }
   }
   return false;
+}
+
+/**
+ * Checks if a phrase occurrence is preceded by a negation word
+ */
+function isPhraseNegated(textLower: string, phrase: string): boolean {
+  const phraseIndex = textLower.indexOf(phrase);
+  const wordsBefore = textLower.slice(0, phraseIndex).split(/\s+/).filter((w) => w.length > 0);
+  return wordsBefore.slice(-NEGATION_WINDOW).some((w) => negationWords.has(w));
 }
 
 /**
@@ -87,35 +100,21 @@ export function calculateSentimentScore(text: string): number {
   const textLower = text.toLowerCase();
 
   // Split into words for negation detection
-  const words = textLower.split(/[^a-z0-9]+/).filter(w => w.length > 0);
+  const words = textLower.split(/[^a-z0-9]+/).filter((w) => w.length > 0);
 
-  // Check for positive phrases first (with word boundaries)
-  for (const phrase of positivePhrases) {
-    const pattern = createWordBoundaryPattern(phrase);
+  // Check for positive phrases (word boundaries, negation-aware)
+  for (const { text: phrase, pattern } of positivePhrasePatterns) {
     const matches = textLower.match(pattern);
     if (matches) {
-      // Check if phrase is negated by looking at word before
-      const phraseIndex = textLower.indexOf(phrase);
-      const wordsBeforePhrase = textLower.slice(0, phraseIndex).split(/\s+/).filter(w => w.length > 0);
-      const recentWords = wordsBeforePhrase.slice(-NEGATION_WINDOW);
-      const isPhraseNegated = recentWords.some(w => negationWords.includes(w));
-      
-      score += matches.length * 15 * (isPhraseNegated ? -1 : 1);
+      score += matches.length * 15 * (isPhraseNegated(textLower, phrase) ? -1 : 1);
     }
   }
 
-  // Check for negative phrases (with word boundaries)
-  for (const phrase of negativePhrases) {
-    const pattern = createWordBoundaryPattern(phrase);
+  // Check for negative phrases (negating a negative = positive)
+  for (const { text: phrase, pattern } of negativePhrasePatterns) {
     const matches = textLower.match(pattern);
     if (matches) {
-      const phraseIndex = textLower.indexOf(phrase);
-      const wordsBeforePhrase = textLower.slice(0, phraseIndex).split(/\s+/).filter(w => w.length > 0);
-      const recentWords = wordsBeforePhrase.slice(-NEGATION_WINDOW);
-      const isPhraseNegated = recentWords.some(w => negationWords.includes(w));
-      
-      // Negating a negative = positive
-      score -= matches.length * 15 * (isPhraseNegated ? -1 : 1);
+      score -= matches.length * 15 * (isPhraseNegated(textLower, phrase) ? -1 : 1);
     }
   }
 
@@ -123,7 +122,7 @@ export function calculateSentimentScore(text: string): number {
   for (let i = 0; i < words.length; i++) {
     const word = words[i];
     const negated = isNegated(words, i);
-    
+
     if (positiveKeywords.has(word)) {
       score += 10 * (negated ? -1 : 1);
     }
@@ -133,10 +132,7 @@ export function calculateSentimentScore(text: string): number {
   }
 
   // Cap the score
-  if (score > 100) score = 100;
-  if (score < -100) score = -100;
-
-  return score;
+  return Math.max(-100, Math.min(100, score));
 }
 
 /**
@@ -149,54 +145,34 @@ export function analyzeSentimentDetailed(text: string): {
   negatedPhrases: string[];
 } {
   const textLower = text.toLowerCase();
-  const words = textLower.split(/[^a-z0-9]+/).filter(w => w.length > 0);
+  const words = textLower.split(/[^a-z0-9]+/).filter((w) => w.length > 0);
   let score = 0;
   const positiveMatches: string[] = [];
   const negativeMatches: string[] = [];
   const negatedPhrases: string[] = [];
 
-  // Check phrases
-  for (const phrase of positivePhrases) {
-    const pattern = createWordBoundaryPattern(phrase);
+  for (const { text: phrase, pattern } of positivePhrasePatterns) {
     const matches = textLower.match(pattern);
     if (matches) {
-      const phraseIndex = textLower.indexOf(phrase);
-      const wordsBeforePhrase = textLower.slice(0, phraseIndex).split(/\s+/).filter(w => w.length > 0);
-      const recentWords = wordsBeforePhrase.slice(-NEGATION_WINDOW);
-      const isNegated = recentWords.some(w => negationWords.includes(w));
-      
-      score += matches.length * 15 * (isNegated ? -1 : 1);
-      if (isNegated) {
-        negatedPhrases.push(phrase);
-      } else {
-        positiveMatches.push(phrase);
-      }
+      const negated = isPhraseNegated(textLower, phrase);
+      score += matches.length * 15 * (negated ? -1 : 1);
+      (negated ? negatedPhrases : positiveMatches).push(phrase);
     }
   }
 
-  for (const phrase of negativePhrases) {
-    const pattern = createWordBoundaryPattern(phrase);
+  for (const { text: phrase, pattern } of negativePhrasePatterns) {
     const matches = textLower.match(pattern);
     if (matches) {
-      const phraseIndex = textLower.indexOf(phrase);
-      const wordsBeforePhrase = textLower.slice(0, phraseIndex).split(/\s+/).filter(w => w.length > 0);
-      const recentWords = wordsBeforePhrase.slice(-NEGATION_WINDOW);
-      const isNegated = recentWords.some(w => negationWords.includes(w));
-      
-      score -= matches.length * 15 * (isNegated ? -1 : 1);
-      if (isNegated) {
-        negatedPhrases.push(phrase);
-      } else {
-        negativeMatches.push(phrase);
-      }
+      const negated = isPhraseNegated(textLower, phrase);
+      score -= matches.length * 15 * (negated ? -1 : 1);
+      (negated ? negatedPhrases : negativeMatches).push(phrase);
     }
   }
 
-  // Check words
   for (let i = 0; i < words.length; i++) {
     const word = words[i];
     const negated = isNegated(words, i);
-    
+
     if (positiveKeywords.has(word)) {
       score += 10 * (negated ? -1 : 1);
       if (!negated) positiveMatches.push(word);

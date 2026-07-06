@@ -3,7 +3,7 @@
 import { useState } from 'react';
 import dynamic from 'next/dynamic';
 import { Article } from '@/lib/types';
-import { humanTime } from '@/lib/utils';
+import { humanTime, safeHostname } from '@/lib/utils';
 import { StockMention } from '@/lib/stockExtractor';
 
 // three.js only loads when a reaction chart is first opened
@@ -184,7 +184,7 @@ export default function ArticleCard({
             </a>
 
             <span className="text-xs text-gray-400 dark:text-gray-500 truncate ml-3">
-              {new URL(article.url).hostname.replace(/^www\./, '')}
+              {safeHostname(article.url)}
             </span>
           </div>
         </div>

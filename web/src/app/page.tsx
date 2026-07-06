@@ -12,8 +12,7 @@ import {
   Sidebar,
   ApiKeyModal
 } from '@/components';
-import { extractStocksFromArticles, expandTickerQuery, StockMention, TickerExpansion } from '@/lib/stockExtractor';
-import { Article } from '@/lib/types';
+import { extractStockMentions, expandTickerQuery, StockMention, TickerExpansion } from '@/lib/stockExtractor';
 
 export default function Home() {
   const {
@@ -43,8 +42,6 @@ export default function Home() {
   const [showBookmarks, setShowBookmarks] = useState(false);
   const [showApiKeys, setShowApiKeys] = useState(false);
   const [tickerExpansion, setTickerExpansion] = useState<TickerExpansion | null>(null);
-  const [stockMentionsMap, setStockMentionsMap] = useState<Map<string, StockMention[]>>(new Map());
-  const [allStockMentions, setAllStockMentions] = useState<StockMention[]>([]);
 
   // Apply dark mode class to html element
   useEffect(() => {
@@ -55,31 +52,25 @@ export default function Home() {
     }
   }, [isDarkMode]);
 
-  // Extract stock mentions from articles
-  useEffect(() => {
-    if (articles.length === 0) {
-      setStockMentionsMap(new Map());
-      setAllStockMentions([]);
-      return;
-    }
-
+  // Extract stock mentions once per result set (memoized — no extra render passes)
+  const { stockMentionsMap, allStockMentions } = useMemo(() => {
     const mentionsMap = new Map<string, StockMention[]>();
-    const allMentionsSet = new Map<string, StockMention>();
+    const uniqueMentions = new Map<string, StockMention>();
 
     for (const article of articles) {
-      const content = `${article.title} ${article.description}`;
-      const mentions = extractStocksFromArticles([{ title: article.title, description: article.description }]);
+      const mentions = extractStockMentions(`${article.title} ${article.description}`);
       mentionsMap.set(article.url, mentions);
-
       for (const mention of mentions) {
-        if (!allMentionsSet.has(mention.symbol)) {
-          allMentionsSet.set(mention.symbol, mention);
+        if (!uniqueMentions.has(mention.symbol)) {
+          uniqueMentions.set(mention.symbol, mention);
         }
       }
     }
 
-    setStockMentionsMap(mentionsMap);
-    setAllStockMentions(Array.from(allMentionsSet.values()));
+    return {
+      stockMentionsMap: mentionsMap,
+      allStockMentions: Array.from(uniqueMentions.values()),
+    };
   }, [articles]);
 
   // Extract trending topics from query and articles
@@ -266,7 +257,6 @@ export default function Home() {
         isOpen={showBookmarks}
         onClose={() => setShowBookmarks(false)}
         bookmarks={bookmarks}
-        isBookmarked={isBookmarked}
         onToggleBookmark={toggleBookmark}
       />
 

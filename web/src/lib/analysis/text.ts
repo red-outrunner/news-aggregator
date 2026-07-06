@@ -8,3 +8,16 @@ export function createWordBoundaryPattern(phrase: string): RegExp {
   const escaped = phrase.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
   return new RegExp(`\\b${escaped}\\b`, 'gi');
 }
+
+export interface CompiledPattern {
+  text: string;
+  pattern: RegExp;
+}
+
+/**
+ * Precompiles word-boundary patterns once (at module load) so scoring
+ * doesn't rebuild regexes for every article
+ */
+export function compileWordBoundaryPatterns(phrases: readonly string[]): CompiledPattern[] {
+  return phrases.map((text) => ({ text, pattern: createWordBoundaryPattern(text) }));
+}

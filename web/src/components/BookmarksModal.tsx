@@ -7,16 +7,14 @@ interface BookmarksModalProps {
   isOpen: boolean;
   onClose: () => void;
   bookmarks: Article[];
-  isBookmarked: (url: string) => boolean;
   onToggleBookmark: (article: Article) => void;
 }
 
-export default function BookmarksModal({ 
-  isOpen, 
-  onClose, 
+export default function BookmarksModal({
+  isOpen,
+  onClose,
   bookmarks,
-  isBookmarked,
-  onToggleBookmark 
+  onToggleBookmark
 }: BookmarksModalProps) {
   if (!isOpen) return null;
 
