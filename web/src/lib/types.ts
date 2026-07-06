@@ -29,3 +29,17 @@ export interface NewsResult {
   articles: Article[];
   totalResults: number;
 }
+
+// Stock quote data returned by /api/stock
+export interface StockData {
+  symbol: string;
+  name: string;
+  price: number;
+  change: number;
+  changePercent: number;
+  dayHigh: number;
+  dayLow: number;
+  drawdown: number;
+  previousClose: number;
+  market?: string;
+}

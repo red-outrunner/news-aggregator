@@ -1,20 +1,14 @@
 // Enhanced policy probability algorithm with word boundary regex
 // Original: calculatePolicyProbability() in ui-aggregator.go
 
+import { createWordBoundaryPattern } from './text';
+
 // Keywords that indicate policy relevance
 const policyKeywords = [
   "policy", "regulation", "law", "government", "legislation", "bill",
   "congress", "senate", "parliament", "decree", "treaty", "court",
   "ruling", "initiative",
 ];
-
-/**
- * Creates a regex pattern with word boundaries for exact word matching
- */
-function createWordBoundaryPattern(word: string): RegExp {
-  const escaped = word.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
-  return new RegExp(`\\b${escaped}\\b`, 'gi');
-}
 
 /**
  * Calculates policy probability score based on policy-related keywords with word boundary matching

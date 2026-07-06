@@ -15,7 +15,7 @@ A modern web-based news aggregator with sentiment analysis, impact scoring, and 
 
 ## Tech Stack
 
-- **Framework**: Next.js 15 (App Router)
+- **Framework**: Next.js 16 (App Router)
 - **Language**: TypeScript
 - **Styling**: Tailwind CSS
 - **State Management**: Zustand (with localStorage persistence)
@@ -65,8 +65,10 @@ web/
 ├── src/
 │   ├── app/
 │   │   ├── api/
-│   │   │   └── news/
-│   │   │       └── route.ts      # NewsAPI proxy endpoint
+│   │   │   ├── news/
+│   │   │   │   └── route.ts      # NewsAPI proxy + article scoring
+│   │   │   └── stock/
+│   │   │       └── route.ts      # Stock quotes (Alpha Vantage / Yahoo)
 │   │   ├── page.tsx              # Main page component
 │   │   ├── layout.tsx            # Root layout
 │   │   └── globals.css           # Global styles
@@ -77,13 +79,18 @@ web/
 │   │   ├── SortFilter.tsx        # Sorting controls
 │   │   ├── BookmarksModal.tsx    # Bookmarks popup
 │   │   ├── ThemeToggle.tsx       # Dark/light mode toggle
+│   │   ├── StockTicker.tsx       # Global markets ticker bar
+│   │   ├── Sidebar.tsx           # Trending topics sidebar
 │   │   └── index.ts              # Component exports
 │   ├── lib/
-│   │   ├── sentiment.ts          # Sentiment analysis algorithm
-│   │   ├── impact.ts             # Impact scoring algorithm
-│   │   ├── policy.ts             # Policy probability algorithm
-│   │   ├── analyzer.ts           # Combined analyzer
-│   │   ├── types.ts              # TypeScript types
+│   │   ├── analysis/
+│   │   │   ├── index.ts          # analyzeArticle() — combined entry point
+│   │   │   ├── sentiment.ts      # Sentiment analysis algorithm
+│   │   │   ├── impact.ts         # Impact scoring algorithm
+│   │   │   ├── policy.ts         # Policy probability algorithm
+│   │   │   └── text.ts           # Shared word-boundary matching helper
+│   │   ├── stockExtractor.ts     # Ticker/index extraction from articles
+│   │   ├── types.ts              # Shared TypeScript types
 │   │   └── utils.ts              # Utility functions
 │   └── store/
 │       └── newsStore.ts          # Zustand state management

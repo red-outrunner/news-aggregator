@@ -4,6 +4,8 @@
 // 2. Regex with word boundaries for accurate phrase matching
 // 3. Modular design for future NLP library integration
 
+import { createWordBoundaryPattern } from './text';
+
 // Positive keywords for sentiment analysis
 const positiveKeywords = new Set([
   // General Positive
@@ -61,15 +63,6 @@ const negationWords = [
 
 // Window size for negation detection (number of words to look back)
 const NEGATION_WINDOW = 3;
-
-/**
- * Creates a regex pattern with word boundaries for exact phrase matching
- */
-function createWordBoundaryPattern(phrase: string): RegExp {
-  // Escape special regex characters and add word boundaries
-  const escaped = phrase.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
-  return new RegExp(`\\b${escaped}\\b`, 'gi');
-}
 
 /**
  * Checks if a word is negated by looking at preceding words

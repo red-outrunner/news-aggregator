@@ -2,19 +2,7 @@
 
 import { useEffect, useState } from 'react';
 import { StockMention } from '@/lib/stockExtractor';
-
-interface StockData {
-  symbol: string;
-  name: string;
-  price: number;
-  change: number;
-  changePercent: number;
-  dayHigh: number;
-  dayLow: number;
-  drawdown: number;
-  previousClose: number;
-  market?: string;
-}
+import { StockData } from '@/lib/types';
 
 interface StockTickerProps {
   mentions: StockMention[];

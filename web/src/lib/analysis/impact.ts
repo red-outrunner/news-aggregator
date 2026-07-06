@@ -1,6 +1,8 @@
 // Enhanced impact score algorithm with word boundary regex
 // Original: calculateImpactScore() in main.go and ui-aggregator.go
 
+import { createWordBoundaryPattern } from './text';
+
 // Impactful words that indicate importance
 const impactfulWords = [
   "major", "significant", "important", "critical", "breaking", "urgent",
@@ -10,14 +12,6 @@ const impactfulWords = [
   "crisis", "breakthrough", "disaster", "economy", "war", "pandemic",
   "reform", "global", "election", "protest", "conflict", "threat",
 ];
-
-/**
- * Creates a regex pattern with word boundaries for exact word matching
- */
-function createWordBoundaryPattern(word: string): RegExp {
-  const escaped = word.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
-  return new RegExp(`\\b${escaped}\\b`, 'gi');
-}
 
 /**
  * Calculates impact score based on important words with word boundary matching
